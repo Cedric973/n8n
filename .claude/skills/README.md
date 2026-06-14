@@ -1,0 +1,29 @@
+# Project Skills
+
+This directory contains the [claude-skills](https://github.com/alirezarezvani/claude-skills)
+library integrated into this repository so Claude Code can discover and use the
+skills automatically.
+
+- **345 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- Skills are flattened to one directory per skill (Claude Code discovers direct
+  children of `.claude/skills/`). The 17 skills whose names collided across
+  source domains are prefixed with their domain, e.g.
+  `engineering__status`, `c-level-advisor__vpe-advisor`.
+- Each `SKILL.md` carries `name` + `description` frontmatter that drives
+  automatic activation; supporting `scripts/`, `references/`, and `assets/`
+  live alongside it.
+
+## Domains included
+
+engineering, engineering-team, c-level-advisor, marketing-skill, ra-qm-team,
+product-team, project-management, compliance-os, commercial,
+business-operations, productivity, markdown-html, business-growth, finance,
+marketing, research, research-ops.
+
+## Updating
+
+These were vendored from the upstream repo. To refresh, re-clone upstream and
+re-copy the skill directories (flattening collisions as above). Upstream also
+supports native install via `/plugin marketplace add alirezarezvani/claude-skills`,
+but vendoring here keeps the skills available in this repo's web/CI sessions
+where user-level plugins do not persist.
