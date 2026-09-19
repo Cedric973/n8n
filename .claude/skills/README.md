@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **349 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- **350 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -41,6 +41,10 @@ Vendored individually from their own repos (not part of the claude-skills librar
   Motion; npm `motion` / `framer-motion`, v13): transitions, gestures, scroll and
   layout animations, motion values. Authored here (upstream ships an npm library,
   not a `SKILL.md`). React-only — for Vue use `motion-v` instead.
+- **motion-v** — animate Vue 3 UIs with Motion for Vue (npm `motion-v`, v2): the
+  Vue port of Motion. **This is the animation skill that applies to this repo's
+  Vue frontend** (`editor-ui`, `@n8n/design-system`). Authored here (upstream
+  ships an npm library, not a `SKILL.md`).
 
 ## Updating
 
