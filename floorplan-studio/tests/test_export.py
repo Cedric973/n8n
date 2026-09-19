@@ -10,7 +10,7 @@ from floorplan.dxf import SKIP_LAYERS, render_dxf
 from floorplan.geometry import Rect
 from floorplan.pdf import render_pdf, text_width
 from floorplan.preview import ascii_plan
-from floorplan.render import build_scene
+from floorplan.render import FACES, _edge_divisions, build_scene
 from floorplan.svg import render_svg
 
 
@@ -54,6 +54,78 @@ class SceneTests(unittest.TestCase):
     def test_hex_parsing(self):
         self.assertEqual(hex_to_rgb("#ffffff"), (1.0, 1.0, 1.0))
         self.assertEqual(hex_to_rgb("#000"), (0.0, 0.0, 0.0))
+
+
+class DimensionTests(unittest.TestCase):
+    """A plan must be dimensioned from every face, not just two of them."""
+
+    def setUp(self):
+        self.plan = sample_plan()
+
+    def test_all_four_faces_are_dimensioned(self):
+        for name, along_x, far in FACES:
+            with self.subTest(face=name):
+                self.assertGreaterEqual(len(_edge_divisions(self.plan, along_x, far)), 2)
+
+    def test_runs_sum_to_the_span(self):
+        for name, along_x, far in FACES:
+            divisions = _edge_divisions(self.plan, along_x, far)
+            runs = sum(b - a for a, b in zip(divisions, divisions[1:]))
+            with self.subTest(face=name):
+                self.assertAlmostEqual(runs, divisions[-1] - divisions[0], places=6)
+
+    def test_no_degenerate_runs(self):
+        for footprint in (Polygon.rectangle(48, 32), Polygon.l_shape(56, 40, 18, 14),
+                          Polygon.u_shape(54, 38, 16, 12)):
+            spec = PlanSpec.from_program(footprint, bedrooms=3, bathrooms=2)
+            for plan in generate(spec, variants=2):
+                for name, along_x, far in FACES:
+                    divisions = _edge_divisions(plan, along_x, far)
+                    for a, b in zip(divisions, divisions[1:]):
+                        with self.subTest(face=name):
+                            self.assertGreaterEqual(b - a, 0.25)
+
+    def test_far_faces_span_only_what_exists(self):
+        """On an L-shape the north and east faces are shorter than the bounding box."""
+        spec = PlanSpec.from_program(Polygon.l_shape(56, 40, 18, 14), bedrooms=3, bathrooms=2)
+        plan = generate(spec, variants=1)[0]
+        bounds = plan.footprint.bounds
+        north = _edge_divisions(plan, True, True)
+        east = _edge_divisions(plan, False, True)
+        self.assertLess(north[-1] - north[0], bounds.w - 1)
+        self.assertLess(east[-1] - east[0], bounds.h - 1)
+
+    def test_near_faces_span_the_whole_building(self):
+        bounds = self.plan.footprint.bounds
+        south = _edge_divisions(self.plan, True, False)
+        west = _edge_divisions(self.plan, False, False)
+        self.assertAlmostEqual(south[-1] - south[0], bounds.w, places=4)
+        self.assertAlmostEqual(west[-1] - west[0], bounds.h, places=4)
+
+    def test_scene_leaves_room_for_every_chain(self):
+        scene = build_scene(self.plan)
+        bounds = self.plan.footprint.bounds
+        dims = [i for i in scene.items if i.layer == "DIMS"]
+        self.assertGreater(len(dims), 20)
+        for item in dims:
+            points = item.points if hasattr(item, "points") else [(item.x, item.y)]
+            for x, y in points:
+                self.assertGreaterEqual(x, scene.bounds.x)
+                self.assertLessEqual(x, scene.bounds.x2)
+                self.assertGreaterEqual(y, scene.bounds.y)
+                self.assertLessEqual(y, scene.bounds.y2)
+
+    def test_north_arrow_clears_the_east_chain(self):
+        scene = build_scene(self.plan)
+        bounds = self.plan.footprint.bounds
+        east = [i for i in scene.items if i.layer == "DIMS"
+                and getattr(i, "points", None) and i.points[0][0] > bounds.x2]
+        arrow = [i for i in scene.items if i.layer == "SHEET"
+                 and getattr(i, "points", None) and i.points[0][0] > bounds.x2]
+        self.assertTrue(east and arrow)
+        furthest_dim = max(x for i in east for x, _ in i.points)
+        nearest_arrow = min(x for i in arrow for x, _ in i.points)
+        self.assertGreater(nearest_arrow, furthest_dim)
 
 
 class SvgTests(unittest.TestCase):

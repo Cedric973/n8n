@@ -22,8 +22,8 @@ WALL = "#2a2a2a"
 LIGHT = "#8a8a8a"
 PAPER = "#ffffff"
 
-LEFT_MARGIN, RIGHT_MARGIN = 9.0, 9.0
-BOTTOM_MARGIN, TOP_MARGIN = 15.0, 6.0
+LEFT_MARGIN, RIGHT_MARGIN = 9.0, 14.0
+BOTTOM_MARGIN, TOP_MARGIN = 15.0, 9.0
 TITLE_HEIGHT = 5.5
 
 
@@ -277,26 +277,66 @@ def _chain(scene: Scene, values: list[float], at: float, horizontal: bool, text_
                        color=INK, rotate=90.0, layer="DIMS")
 
 
-def _edge_divisions(plan: Plan, horizontal: bool) -> list[float]:
-    """Coordinates where interior walls meet the outermost wall of the plan."""
+#: The four faces a plan is dimensioned from, as (chain runs along x, far side).
+FACES = (("south", True, False), ("north", True, True),
+         ("west", False, False), ("east", False, True))
+
+
+def _edge_divisions(plan: Plan, along_x: bool, far: bool) -> list[float]:
+    """Coordinates where interior walls meet one outer face of the plan.
+
+    The extent comes from the rooms that actually reach that face, not from the
+    bounding box, so on an L- or U-shaped footprint the north and east chains
+    span only the part of the building that is really there.
+    """
     bounds = plan.footprint.bounds
-    edge = bounds.y if horizontal else bounds.x
-    values = {bounds.x, bounds.x2} if horizontal else {bounds.y, bounds.y2}
+    if along_x:
+        face = bounds.y2 if far else bounds.y
+    else:
+        face = bounds.x2 if far else bounds.x
+
+    values: set[float] = set()
     for room in plan.rooms:
         if room.rect.area <= 0:
             continue
-        touches = abs(room.rect.y - edge) < 1e-4 if horizontal else abs(room.rect.x - edge) < 1e-4
-        if touches:
-            values.update((room.rect.x, room.rect.x2) if horizontal else (room.rect.y, room.rect.y2))
-    return sorted(values)
+        if along_x:
+            near = room.rect.y2 if far else room.rect.y
+            if abs(near - face) < 1e-4:
+                values.update((room.rect.x, room.rect.x2))
+        else:
+            near = room.rect.x2 if far else room.rect.x
+            if abs(near - face) < 1e-4:
+                values.update((room.rect.y, room.rect.y2))
+    return _collapse(sorted(values))
+
+
+def _collapse(values: list[float], tol: float = 0.25) -> list[float]:
+    """Merge division marks closer together than a dimension can usefully show."""
+    out: list[float] = []
+    for value in values:
+        if out and value - out[-1] < tol:
+            out[-1] = (out[-1] + value) / 2.0
+        else:
+            out.append(value)
+    return out
 
 
 def _draw_dimensions(scene: Scene, plan: Plan) -> None:
+    """Dimension all four faces: room-by-room, then the overall run outboard."""
     bounds = plan.footprint.bounds
-    _chain(scene, _edge_divisions(plan, True), bounds.y - 3.0, True, -1.05)
-    _chain(scene, [bounds.x, bounds.x2], bounds.y - 6.0, True, -1.05)
-    _chain(scene, _edge_divisions(plan, False), bounds.x - 3.0, False, -1.05)
-    _chain(scene, [bounds.y, bounds.y2], bounds.x - 6.0, False, -1.05)
+    for _name, along_x, far in FACES:
+        divisions = _edge_divisions(plan, along_x, far)
+        if len(divisions) < 2:
+            continue
+        sign = 1.0 if far else -1.0
+        if along_x:
+            face = bounds.y2 if far else bounds.y
+        else:
+            face = bounds.x2 if far else bounds.x
+        _chain(scene, divisions, face + sign * 3.0, along_x, sign * 0.95)
+        if len(divisions) > 2:
+            _chain(scene, [divisions[0], divisions[-1]], face + sign * 6.0,
+                   along_x, sign * 0.95)
 
 
 # --------------------------------------------------------------------------
@@ -304,7 +344,7 @@ def _draw_dimensions(scene: Scene, plan: Plan) -> None:
 # --------------------------------------------------------------------------
 
 def _draw_north(scene: Scene, bounds: Rect) -> None:
-    cx, cy = bounds.x2 + 4.5, bounds.y2 - 2.5
+    cx, cy = bounds.x2 + 10.5, bounds.y2 - 2.5
     scene.polyline(
         [(cx, cy + 1.9), (cx + 0.85, cy - 1.5), (cx, cy - 0.75), (cx - 0.85, cy - 1.5)],
         closed=True, fill=INK, layer="SHEET",
