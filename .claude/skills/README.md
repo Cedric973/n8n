@@ -1,10 +1,11 @@
 # Project Skills
 
-This directory contains the [claude-skills](https://github.com/alirezarezvani/claude-skills)
-library integrated into this repository so Claude Code can discover and use the
-skills automatically.
+This directory contains skills integrated into this repository so Claude Code
+can discover and use them automatically. The bulk come from the
+[claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
+individually vendored skills (see **Additional skills** below).
 
-- **345 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- **346 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -19,6 +20,13 @@ engineering, engineering-team, c-level-advisor, marketing-skill, ra-qm-team,
 product-team, project-management, compliance-os, commercial,
 business-operations, productivity, markdown-html, business-growth, finance,
 marketing, research, research-ops.
+
+## Additional skills
+
+Vendored individually from their own repos (not part of the claude-skills library):
+
+- **scroll-world** — builds a scroll-scrubbed "fly through the world" landing
+  page via Higgsfield. From [oso95/scroll-world](https://github.com/oso95/scroll-world).
 
 ## Updating
 
