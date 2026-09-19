@@ -19,7 +19,7 @@ import struct
 import zlib
 
 from .drawing import Path, Scene, Text, hex_to_rgb
-from .font import CAP, GLYPH_WIDTH, glyph
+from .font import CAP, GAP, glyph, natural_width, width as glyph_width
 from .metrics import HELVETICA, HELVETICA_BOLD, text_width
 
 MIN_STROKE_PX = 1.0
@@ -191,25 +191,29 @@ def _draw_text(canvas: Canvas, text: Text, px, scale: float) -> None:
     size = text.size * scale
     if size < 3.0:
         return  # unreadable at this scale; leave it out rather than smear it
-    table = HELVETICA_BOLD if text.bold else HELVETICA
     y_unit = text.size / CAP
     shift = {"start": 0.0, "middle": -0.5, "end": -1.0}.get(text.anchor, -0.5)
     angle = math.radians(text.rotate)
     cos, sin = math.cos(angle), math.sin(angle)
     color = hex_to_rgb_bytes(text.color)
-    weight = max(size * (0.115 if text.bold else 0.075), 1.0)
+    weight = max(size * (0.14 if text.bold else 0.095), 1.2)
 
-    # Each glyph is advanced by its real Helvetica width and squeezed to match,
-    # so a preview string covers exactly the span the SVG and PDF will.
-    pen = text_width(text.value, text.size, text.bold) * shift
+    # The whole string is scaled by one factor so it spans exactly its
+    # Helvetica width. Letters keep their proportions — squeezing each glyph to
+    # its own Helvetica advance made narrow letters vanish and neighbours
+    # collide. The string is never drawn wider than its natural shape.
+    target = text_width(text.value, text.size, text.bold)
+    natural = natural_width(text.value)
+    x_unit = min(target / natural, y_unit * 1.05) if natural > 0 else y_unit
+    drawn = natural * x_unit
+    pen = target * shift + (target - drawn) / 2.0  # centre inside the Helvetica extent
+
     for char in text.value:
-        step = table.get(char, 500) / 1000.0 * text.size
-        x_unit = step * 0.84 / GLYPH_WIDTH
         for stroke in glyph(char):
             points = []
             for gx, gy in stroke:
-                fx = pen + step * 0.08 + gx * x_unit
+                fx = pen + gx * x_unit
                 fy = gy * y_unit - text.size * 0.5
                 points.append(px(text.x + fx * cos - fy * sin, text.y + fx * sin + fy * cos))
             canvas.stroke(points, weight, color)
-        pen += step
+        pen += (glyph_width(char) + GAP) * x_unit

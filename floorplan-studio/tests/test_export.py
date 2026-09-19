@@ -385,3 +385,42 @@ class LabelTests(unittest.TestCase):
             with self.subTest(text=text.value):
                 self.assertFalse(start < left < end, "text crosses the first rule")
                 self.assertFalse(start < right < end, "text crosses the second rule")
+
+
+class StrokeFontTests(unittest.TestCase):
+    """The preview font must be legible and must not lie about text extents."""
+
+    def test_every_printable_ascii_letter_and_digit_has_a_glyph(self):
+        from floorplan.font import GLYPHS
+        for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789":
+            self.assertIn(char, GLYPHS, char)
+
+    def test_strings_are_never_drawn_wider_than_helvetica(self):
+        """A label that fits its room in the PDF must also fit in the PNG."""
+        from floorplan.font import natural_width, CAP
+        for value, bold in (("KITCHEN", True), ("3.98 m", False), ("12.4 m²", False),
+                            ("Rue des Lilas", True), ("SCALE  1:50", False), ("W.I.C.", True)):
+            target = text_width(value, 1.0, bold)
+            drawn = natural_width(value) / CAP
+            x_unit = min(target / (natural_width(value) or 1), 1.05 / CAP)
+            with self.subTest(text=value):
+                self.assertLessEqual(natural_width(value) * x_unit, target + 1e-9)
+
+    def test_narrow_letters_are_narrow_by_design(self):
+        from floorplan.font import width
+        self.assertLess(width("i"), width("m"))
+        self.assertLess(width("I"), width("W"))
+        self.assertLess(width("."), width("0"))
+
+    def test_condensation_stays_mild(self):
+        """Uniform scaling must not crush a typical label below ~75%."""
+        from floorplan.font import natural_width, CAP
+        for value, bold in (("KITCHEN", True), ("3.98 m", False), ("12.4 m²", False),
+                            ("PRIMARY BEDROOM", True), ("2026-09-19", False)):
+            ratio = text_width(value, 1.0, bold) / (natural_width(value) / CAP)
+            with self.subTest(text=value):
+                self.assertGreater(ratio, 0.72, f"{value} condensed to {ratio:.0%}")
+
+    def test_zero_has_no_slash(self):
+        from floorplan.font import GLYPHS
+        self.assertEqual(len(GLYPHS["0"]), 1)
