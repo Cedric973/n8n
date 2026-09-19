@@ -11,47 +11,11 @@ the same convention the scene uses, so only a scale and an offset are needed.
 from __future__ import annotations
 
 from .drawing import Path, Scene, Text, fit_scale, hex_to_rgb
-
-# Character widths in 1/1000 em, from the Adobe Helvetica metrics. Enough of
-# the set to place the text this package actually emits.
-_BASE = {
-    " ": 278, "!": 278, '"': 355, "'": 191, "(": 333, ")": 333, "*": 389, "+": 584,
-    ",": 278, "-": 333, ".": 278, "/": 278, ":": 278, ";": 278, "=": 584, "?": 556,
-    "·": 333, "×": 584, "_": 556,
-}
-_BASE.update({str(d): 556 for d in range(10)})
-HELVETICA = dict(_BASE)
-HELVETICA.update(dict(zip(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    [667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833,
-     722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611],
-)))
-HELVETICA.update(dict(zip(
-    "abcdefghijklmnopqrstuvwxyz",
-    [556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833,
-     556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500],
-)))
-HELVETICA_BOLD = dict(_BASE)
-HELVETICA_BOLD.update({"'": 238, '"': 474})
-HELVETICA_BOLD.update(dict(zip(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    [722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833,
-     722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611],
-)))
-HELVETICA_BOLD.update(dict(zip(
-    "abcdefghijklmnopqrstuvwxyz",
-    [556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889,
-     611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500],
-)))
+from .metrics import HELVETICA, HELVETICA_BOLD, text_width
 
 LETTER_LANDSCAPE = (792.0, 612.0)
 MARGIN = 20.0
 MIN_STROKE_PT = 0.25
-
-
-def text_width(value: str, size: float, bold: bool = False) -> float:
-    table = HELVETICA_BOLD if bold else HELVETICA
-    return sum(table.get(ch, 500) for ch in value) / 1000.0 * size
 
 
 def render_pdf(scene: Scene, page: tuple[float, float] = LETTER_LANDSCAPE) -> bytes:

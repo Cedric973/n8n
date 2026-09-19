@@ -4,13 +4,15 @@ import re
 import unittest
 import xml.dom.minidom
 
-from floorplan import Polygon, PlanSpec, generate
+from floorplan import Polygon, PlanSpec, RoomSpec, generate
 from floorplan.drawing import Scene, fit_scale, hex_to_rgb
 from floorplan.dxf import SKIP_LAYERS, render_dxf
 from floorplan.geometry import Rect
-from floorplan.pdf import render_pdf, text_width
+from floorplan.metrics import text_width
+from floorplan.pdf import render_pdf
+from floorplan.raster import Canvas, render_png
 from floorplan.preview import ascii_plan
-from floorplan.render import FACES, _edge_divisions, build_scene
+from floorplan.render import FACES, _edge_divisions, _fit, build_scene
 from floorplan.svg import render_svg
 
 
@@ -229,3 +231,150 @@ class PreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RasterTests(unittest.TestCase):
+    """The PNG backend, and the layout defects it was built to catch."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.plan = sample_plan()
+        cls.scene = build_scene(cls.plan)
+        cls.png = render_png(cls.scene, width=700)
+
+    def test_png_is_structurally_valid(self):
+        self.assertTrue(self.png.startswith(b"\x89PNG\r\n\x1a\n"))
+        length = int.from_bytes(self.png[8:12], "big")
+        self.assertEqual(self.png[12:16], b"IHDR")
+        self.assertEqual(length, 13)
+        self.assertTrue(self.png.endswith(b"IEND\xae\x42\x60\x82"))
+
+    def test_every_chunk_crc_checks_out(self):
+        import zlib
+        offset = 8
+        seen = []
+        while offset < len(self.png):
+            length = int.from_bytes(self.png[offset:offset + 4], "big")
+            kind = self.png[offset + 4:offset + 8]
+            payload = self.png[offset + 8:offset + 8 + length]
+            stored = int.from_bytes(self.png[offset + 8 + length:offset + 12 + length], "big")
+            self.assertEqual(stored, zlib.crc32(kind + payload) & 0xFFFFFFFF, kind)
+            seen.append(kind)
+            offset += 12 + length
+        self.assertEqual(seen, [b"IHDR", b"IDAT", b"IEND"])
+
+    def test_pixel_data_decompresses_to_the_declared_size(self):
+        import zlib
+        width = int.from_bytes(self.png[16:20], "big")
+        height = int.from_bytes(self.png[20:24], "big")
+        start = self.png.index(b"IDAT") + 4
+        length = int.from_bytes(self.png[start - 8:start - 4], "big")
+        raw = zlib.decompress(self.png[start:start + length])
+        self.assertEqual(len(raw), height * (width * 3 + 1))
+
+    def test_rendering_is_deterministic(self):
+        self.assertEqual(self.png, render_png(build_scene(sample_plan()), width=700))
+
+    def test_supersampling_keeps_the_requested_size(self):
+        plain = render_png(self.scene, width=400)
+        smooth = render_png(self.scene, width=400, supersample=2)
+        self.assertEqual(plain[16:24], smooth[16:24])
+        self.assertNotEqual(plain, smooth)
+
+
+class LabelTests(unittest.TestCase):
+    """Regressions found by looking at a rendered plan."""
+
+    def _labels(self, plan):
+        return [t for t in build_scene(plan).texts if t.layer == "TEXT"]
+
+    def test_fit_shrinks_text_until_it_fits(self):
+        """The unit that guarantees a label fits, rather than guessing a size."""
+        long_name = "PRIMARY BEDROOM SUITE"
+        size = _fit(long_name, 7.0, 0.78)
+        self.assertLess(size, 0.78)
+        self.assertLessEqual(text_width(long_name, size), 7.0 + 1e-9)
+        # Short text is never enlarged past the preferred size.
+        self.assertEqual(_fit("A", 50.0, 0.78), 0.78)
+
+    def test_labels_fit_inside_their_room(self):
+        """A label must not spill across the walls that bound it."""
+        cases = [
+            (Polygon.l_shape(56, 40, 18, 14), dict(bedrooms=4, bathrooms=3, garage=True)),
+            (Polygon.rectangle(48, 32), dict(bedrooms=3, bathrooms=2)),
+            (Polygon.rectangle(34, 26), dict(bedrooms=2, bathrooms=1)),
+        ]
+        specs = [PlanSpec.from_program(fp, **prog) for fp, prog in cases]
+        # A deliberately long room name: without fitting, this overflows.
+        specs.append(PlanSpec(
+            footprint=Polygon.rectangle(40, 28),
+            rooms=[RoomSpec("living", name="Great Room And Hearth"),
+                   RoomSpec("kitchen", name="Kitchen And Scullery"),
+                   RoomSpec("primary_bedroom", name="Primary Bedroom Suite"),
+                   RoomSpec("primary_bath"), RoomSpec("bedroom", name="Guest Bedroom Two"),
+                   RoomSpec("foyer")],
+        ))
+        for spec in specs:
+            for plan in generate(spec, variants=2):
+                for text in self._labels(plan):
+                    room = min(plan.rooms, key=lambda r: (r.rect.center[0] - text.x) ** 2
+                               + (r.rect.center[1] - text.y) ** 2)
+                    net = room.net_rect(plan.spec, plan.footprint)
+                    available = net.h if text.rotate else net.w
+                    with self.subTest(room=room.label, text=text.value):
+                        self.assertLessEqual(text_width(text.value, text.size), available)
+
+    def test_rotated_labels_stack_across_their_baseline(self):
+        """Rotated lines spread along x; stacking them in y would overlap them."""
+        spec = PlanSpec.from_program(Polygon.rectangle(48, 32), bedrooms=3, bathrooms=2)
+        checked = 0
+        for plan in generate(spec, variants=4):
+            for room in plan.rooms:
+                lines = [t for t in self._labels(plan)
+                         if t.rotate and room.rect.contains_point((t.x, t.y))]
+                if len(lines) < 2:
+                    continue
+                checked += 1
+                spread_x = max(l.x for l in lines) - min(l.x for l in lines)
+                spread_y = max(l.y for l in lines) - min(l.y for l in lines)
+                with self.subTest(room=room.label):
+                    self.assertGreater(spread_x, 0.1)
+                    self.assertLess(spread_y, 0.1)
+        self.assertGreater(checked, 0, "no multi-line rotated label was exercised")
+
+    def test_upright_labels_stack_vertically(self):
+        spec = PlanSpec.from_program(Polygon.rectangle(48, 32), bedrooms=3, bathrooms=2)
+        plan = generate(spec, variants=1)[0]
+        checked = 0
+        for room in plan.rooms:
+            lines = [t for t in self._labels(plan)
+                     if not t.rotate and room.rect.contains_point((t.x, t.y))]
+            if len(lines) < 2:
+                continue
+            checked += 1
+            self.assertGreater(max(l.y for l in lines) - min(l.y for l in lines), 0.1)
+            self.assertLess(max(l.x for l in lines) - min(l.x for l in lines), 0.1)
+        self.assertGreater(checked, 0)
+
+    def test_title_block_cells_do_not_overlap(self):
+        """Each cell holds its own text; nothing crosses a rule.
+
+        Checked on a narrow plan, where the facts line does not fit its cell at
+        the preferred size and has to be shrunk to stay inside it.
+        """
+        spec = PlanSpec.from_program(Polygon.rectangle(26, 22), bedrooms=1, bathrooms=1,
+                                     formal_dining=False, pantry=False, title="Narrow Lot")
+        plan = generate(spec, variants=1)[0]
+        scene = build_scene(plan)
+        bounds = plan.footprint.bounds
+        sheet = [t for t in scene.texts if t.layer == "SHEET" and t.y < bounds.y]
+        self.assertGreaterEqual(len(sheet), 4)
+        left = bounds.x + bounds.w * 0.54
+        right = bounds.x + bounds.w * 0.76
+        for text in sheet:
+            width = text_width(text.value, text.size)
+            start = text.x if text.anchor == "start" else text.x - width
+            end = start + width
+            with self.subTest(text=text.value):
+                self.assertFalse(start < left < end, "text crosses the first rule")
+                self.assertFalse(start < right < end, "text crosses the second rule")

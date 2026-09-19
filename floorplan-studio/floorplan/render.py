@@ -15,6 +15,7 @@ from datetime import date
 
 from .drawing import HAIRLINE, Path, Scene, Text
 from .geometry import Rect, Segment, format_feet
+from .metrics import text_width
 from .plan import Plan, PlacedRoom
 
 INK = "#1b1b1b"
@@ -211,6 +212,28 @@ def _draw_garage(scene: Scene, plan: Plan, opening) -> None:
 # labels
 # --------------------------------------------------------------------------
 
+MIN_LABEL = 0.34  # feet of cap height below which a label is not worth drawing
+
+
+def _fit(value: str, available: float, preferred: float, bold: bool = False) -> float:
+    """Largest cap height at or below ``preferred`` that fits ``value``."""
+    unit = text_width(value, 1.0, bold)
+    if unit <= 0:
+        return preferred
+    return min(preferred, available / unit)
+
+
+def _stack(cx: float, cy: float, offset: float, rotate: float) -> tuple[float, float]:
+    """Move ``offset`` perpendicular to a baseline at ``rotate`` degrees.
+
+    Label lines must stack across their own reading direction; offsetting in y
+    regardless of rotation piles the lines of a rotated label on top of one
+    another.
+    """
+    angle = math.radians(rotate)
+    return (cx - offset * math.sin(angle), cy + offset * math.cos(angle))
+
+
 def _draw_labels(scene: Scene, plan: Plan) -> None:
     for room in plan.rooms:
         if room.rect.area <= 0:
@@ -219,25 +242,26 @@ def _draw_labels(scene: Scene, plan: Plan) -> None:
         cx, cy = room.rect.center
         upright = net.h <= net.w * 1.5 or net.w >= 7.0
         rotate = 0.0 if upright else 90.0
-        along = net.w if upright else net.h
-        across = net.h if upright else net.w
+        along = (net.w if upright else net.h) * 0.88   # keep clear of the walls
+        across = (net.h if upright else net.w) * 0.88
 
         name = room.label.upper()
-        size = min(0.78, max(0.42, along / max(len(name) * 0.62, 1.0)))
-        if across < 2.2 * size or along < size * 2:
+        size = _fit(name, along, 0.78, bold=True)
+        if size < MIN_LABEL or across < 1.6 * size:
             continue  # no room for a legible label
 
-        detail = across >= 4.6 * size
-        if detail:
-            scene.text(cx, cy + size * 0.75, name, size=size, bold=True, color=INK,
-                       rotate=rotate, layer="TEXT")
-            scene.text(cx, cy - size * 0.35,
-                       f"{format_feet(net.w)} x {format_feet(net.h)}",
-                       size=size * 0.7, color=LIGHT, rotate=rotate, layer="TEXT")
-            scene.text(cx, cy - size * 1.4, f"{round(net.area)} SF",
-                       size=size * 0.7, color=LIGHT, rotate=rotate, layer="TEXT")
+        dims = f"{format_feet(net.w)} x {format_feet(net.h)}"
+        area = f"{round(net.area)} SF"
+        detail_size = min(size * 0.7, _fit(dims, along, size * 0.7), _fit(area, along, size * 0.7))
+        if across >= 4.2 * size and detail_size >= MIN_LABEL:
+            scene.text(*_stack(cx, cy, size * 0.80, rotate), name, size=size, bold=True,
+                       color=INK, rotate=rotate, layer="TEXT")
+            scene.text(*_stack(cx, cy, -size * 0.30, rotate), dims, size=detail_size,
+                       color=LIGHT, rotate=rotate, layer="TEXT")
+            scene.text(*_stack(cx, cy, -size * 1.30, rotate), area, size=detail_size,
+                       color=LIGHT, rotate=rotate, layer="TEXT")
         else:
-            scene.text(cx, cy - size * 0.35, name, size=size, bold=True, color=INK,
+            scene.text(cx, cy, name, size=size, bold=True, color=INK,
                        rotate=rotate, layer="TEXT")
 
 
@@ -353,41 +377,56 @@ def _draw_north(scene: Scene, bounds: Rect) -> None:
 
 
 def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
+    """Three ruled cells: identity, scale, issue. Nothing shares a cell."""
     top = bounds.y - 8.0
     box = Rect(bounds.x, top - TITLE_HEIGHT, bounds.w, TITLE_HEIGHT)
     scene.rect(box, stroke=INK, width=HAIRLINE * 1.5, layer="SHEET")
-    scene.line(box.x, box.y2 - 2.2, box.x2, box.y2 - 2.2, stroke=INK,
-               width=HAIRLINE, layer="SHEET")
+
+    identity = box.x + box.w * 0.54
+    issue = box.x + box.w * 0.76
+    for x in (identity, issue):
+        scene.line(x, box.y, x, box.y2, stroke=INK, width=HAIRLINE, layer="SHEET")
 
     summary = plan.summary()
-    scene.text(box.x + 0.8, box.y2 - 1.55, plan.spec.title, size=1.0, bold=True,
-               anchor="start", color=INK, layer="SHEET")
-    baths = summary["bathrooms"]
+    pad = 0.7
+    title_size = _fit(plan.spec.title, identity - box.x - 2 * pad, 1.0, bold=True)
+    scene.text(box.x + pad, box.y2 - 1.55, plan.spec.title, size=max(title_size, 0.45),
+               bold=True, anchor="start", color=INK, layer="SHEET")
+
     facts = (
-        f"{summary['bedrooms']} BED   {baths} BATH   "
+        f"{summary['bedrooms']} BED   {summary['bathrooms']} BATH   "
         f"{summary['conditioned_sqft']} SF CONDITIONED   {summary['rooms']} ROOMS"
     )
-    scene.text(box.x + 0.8, box.y + 1.15, facts, size=0.6, anchor="start",
-               color=INK, layer="SHEET")
-    scene.text(box.x2 - 0.8, box.y2 - 1.5, date.today().isoformat(), size=0.6,
+    facts_size = _fit(facts, identity - box.x - 2 * pad, 0.6)
+    scene.text(box.x + pad, box.y + 1.15, facts, size=max(facts_size, 0.3),
+               anchor="start", color=INK, layer="SHEET")
+
+    scene.text(box.x2 - pad, box.y2 - 1.5, date.today().isoformat(),
+               size=_fit(date.today().isoformat(), box.x2 - issue - 2 * pad, 0.6),
                anchor="end", color=LIGHT, layer="SHEET")
-    scene.text(box.x2 - 0.8, box.y + 1.15, f"SCHEMATIC  ·  SEED {plan.seed}",
-               size=0.6, anchor="end", color=LIGHT, layer="SHEET")
-    _draw_scale_bar(scene, box)
+    seed = f"SCHEMATIC · SEED {plan.seed}"
+    scene.text(box.x2 - pad, box.y + 1.15, seed,
+               size=_fit(seed, box.x2 - issue - 2 * pad, 0.6),
+               anchor="end", color=LIGHT, layer="SHEET")
+    _draw_scale_bar(scene, Rect(identity, box.y, issue - identity, box.h))
 
 
-def _draw_scale_bar(scene: Scene, box: Rect) -> None:
-    length, ticks = 10.0, 5
-    x0 = box.center[0] - length / 2.0
-    y0 = box.y + 1.4
+def _draw_scale_bar(scene: Scene, cell: Rect) -> None:
+    """A ruled bar with its ends labelled, sized to a round number of feet."""
+    length = next((n for n in (10.0, 5.0, 2.0) if n <= cell.w * 0.72), cell.w * 0.72)
+    ticks = 5 if length >= 5 else 4
+    x0 = cell.center[0] - length / 2.0
+    y0 = cell.y + cell.h * 0.46
     step = length / ticks
     for i in range(ticks):
         scene.rect(
-            Rect(x0 + i * step, y0, step, 0.32),
+            Rect(x0 + i * step, y0, step, cell.h * 0.13),
             fill=INK if i % 2 == 0 else PAPER,
-            stroke=INK,
-            width=HAIRLINE * 0.8,
-            layer="SHEET",
+            stroke=INK, width=HAIRLINE * 0.8, layer="SHEET",
         )
-    scene.text(x0, y0 - 0.85, "0", size=0.5, color=LIGHT, layer="SHEET")
-    scene.text(x0 + length, y0 - 0.85, "10 FT", size=0.5, color=LIGHT, layer="SHEET")
+    # Labelled at each end rather than as one padded string, so the text can
+    # never grow wider than the bar it belongs to.
+    size = min(0.5, _fit("00 FT", cell.w * 0.4, 0.5))
+    scene.text(x0, y0 - 0.8, "0", size=size, anchor="start", color=LIGHT, layer="SHEET")
+    scene.text(x0 + length, y0 - 0.8, f"{length:g} FT", size=size, anchor="end",
+               color=LIGHT, layer="SHEET")

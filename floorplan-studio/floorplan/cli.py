@@ -11,10 +11,11 @@ from .api import RequestError, generate_from
 from .dxf import render_dxf
 from .pdf import render_pdf
 from .preview import ascii_plan
+from .raster import render_png
 from .render import build_scene
 from .svg import render_svg
 
-FORMATS = ("svg", "pdf", "dxf", "json")
+FORMATS = ("svg", "pdf", "png", "dxf", "json")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--variants", type=int, default=3)
     out.add_argument("--seed", type=int, default=0)
     out.add_argument("--out", type=Path, default=Path("plans"))
-    out.add_argument("--formats", default="svg,pdf,dxf",
+    out.add_argument("--formats", default="svg,pdf,png,dxf",
                      help=f"comma separated, from {','.join(FORMATS)}")
     out.add_argument("--preview", action="store_true", help="print an ASCII plan per variant")
     out.add_argument("--quiet", action="store_true")
@@ -90,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         if "pdf" in formats:
             stem.with_suffix(".pdf").write_bytes(render_pdf(scene))
             written.append("pdf")
+        if "png" in formats:
+            stem.with_suffix(".png").write_bytes(render_png(scene))
+            written.append("png")
         if "dxf" in formats:
             stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding="utf-8")
             written.append("dxf")

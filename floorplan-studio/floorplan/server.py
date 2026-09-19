@@ -18,6 +18,7 @@ from pathlib import Path
 from .api import RequestError, catalog, generate_from, replay
 from .dxf import render_dxf
 from .pdf import render_pdf
+from .raster import render_png
 from .render import build_scene
 from .svg import render_svg
 
@@ -27,6 +28,7 @@ MAX_BODY = 256 * 1024
 EXPORTERS = {
     "svg": ("image/svg+xml", lambda scene: render_svg(scene).encode("utf-8")),
     "pdf": ("application/pdf", render_pdf),
+    "png": ("image/png", render_png),
     "dxf": ("image/vnd.dxf", lambda scene: render_dxf(scene).encode("utf-8")),
 }
 

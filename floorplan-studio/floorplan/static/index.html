@@ -390,7 +390,7 @@
 
       var downloads = document.createElement("span");
       downloads.className = "downloads";
-      ["pdf", "svg", "dxf"].forEach(function (fmt) {
+      ["pdf", "png", "svg", "dxf"].forEach(function (fmt) {
         var b = document.createElement("button");
         b.type = "button"; b.className = "mini"; b.textContent = fmt.toUpperCase();
         b.addEventListener("click", function () { download(body, variant.seed, fmt, b); });

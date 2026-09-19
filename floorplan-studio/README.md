@@ -27,7 +27,7 @@ python3 -m floorplan.cli \
     --shape l --width 56 --depth 40 \
     --bedrooms 4 --bathrooms 3 --garage --mudroom \
     --title "Cedar Ridge" --variants 3 \
-    --out plans --formats svg,pdf,dxf --preview
+    --out plans --formats svg,pdf,png,dxf --preview
 ```
 
 `--preview` prints an ASCII plan per variant, which is the fastest way to see
@@ -110,9 +110,22 @@ serialises that same scene — so the SVG, the PDF and the DXF cannot drift apar
 | Output | Notes |
 |---|---|
 | SVG | For the browser and the web UI. |
-| PDF | Hand-written PDF 1.4 writer, Helvetica metrics included for correct text centring. |
+| PDF | Hand-written PDF 1.4 writer, Helvetica metrics for correct text placement. |
+| PNG | Hand-written scanline rasteriser and PNG encoder. |
 | DXF | AutoCAD R12 ASCII, 1:1 in model space in feet, on named layers, linework only. |
 | JSON | The full plan: rooms, rects, openings, score breakdown. |
+
+The PNG backend exists because you cannot trust a drawing you have never looked
+at. Numeric checks confirm a label sits at some coordinate; only an image shows
+that two labels are on top of each other. Rasterising in pure Python means the
+plan can be inspected anywhere, with no graphics stack installed, and it caught
+two layout defects that every numeric test had passed.
+
+It draws text with the single-stroke font in `font.py`, so letterforms differ
+from the Helvetica used by SVG and PDF. Each glyph is advanced and squeezed to
+its real Helvetica width, though, so a string covers exactly the span it will in
+the real output — which is what makes the preview trustworthy for judging
+whether a label fits its room.
 
 Walls are centred on room boundaries, so the footprint outline is the exterior
 wall centreline and a room's rect runs to the middle of its walls. The
@@ -130,7 +143,9 @@ dimensions printed inside each room are the net, inside-face figures.
 | `scoring.py` | Ranking plans against each other |
 | `drawing.py` | Backend-independent scene primitives |
 | `render.py` | Plan to scene: walls, swings, labels, dimensions, title block |
-| `svg.py` `pdf.py` `dxf.py` | Scene to file |
+| `svg.py` `pdf.py` `dxf.py` `raster.py` | Scene to file |
+| `metrics.py` | Helvetica character widths, for placing and fitting text |
+| `font.py` | Single-stroke vector font, used only by the rasteriser |
 | `preview.py` | ASCII plan for the terminal |
 | `api.py` | JSON request to spec, shared by the CLI and the server |
 | `cli.py` `server.py` | Entry points |
@@ -141,13 +156,19 @@ dimensions printed inside each room are the net, inside-face figures.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-92 tests. The layout suite checks the invariants that matter across every
+109 tests. The layout suite checks the invariants that matter across every
 footprint, program and seed: rooms tile the footprint exactly, never overlap,
 never come out with zero area, and the same seed always gives the same plan.
 The circulation suite checks that every returned plan is fully reachable from
 the front door and that no bathroom or closet is a through-route. The export
 suite validates the PDF cross-reference table and stream lengths, DXF group-code
-pairing, and SVG well-formedness by parsing it.
+pairing, PNG chunk CRCs, and SVG well-formedness by parsing it.
+
+The drawing tests are written to fail if their fix is reverted, which is worth
+stating because the first versions of three of them did not: they grouped label
+lines in a way that left the assertion unreached, and passed happily against
+deliberately broken code. If you add one, break the thing it guards and watch it
+fail before trusting it.
 
 ## Known limitations
 
@@ -163,6 +184,10 @@ pairing, and SVG well-formedness by parsing it.
 - **Schematic only.** This is a massing and layout tool. It knows nothing about
   structure, egress, energy or your local code, and its output is not a
   construction document.
+- **The PDF has not been opened.** Its structure is validated — cross-reference
+  offsets, stream lengths, escaping — and it shares its geometry with the PNG,
+  which has been looked at. But no PDF viewer was available to render it, so
+  that is the one output whose appearance is inferred rather than seen.
 
 ## License
 
