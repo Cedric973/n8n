@@ -5,7 +5,7 @@ import unittest
 import xml.dom.minidom
 
 from floorplan import Polygon, PlanSpec, RoomSpec, generate
-from floorplan.drawing import Scene, fit_scale, hex_to_rgb
+from floorplan.drawing import Scene, hex_to_rgb
 from floorplan.dxf import SKIP_LAYERS, render_dxf
 from floorplan.geometry import Rect
 from floorplan.metrics import text_width
@@ -48,10 +48,6 @@ class SceneTests(unittest.TestCase):
     def test_dimensions_can_be_suppressed(self):
         plain = build_scene(sample_plan(), show_dimensions=False)
         self.assertNotIn("DIMS", plain.layers())
-
-    def test_fit_scale_respects_margins(self):
-        scale = fit_scale(Rect(0, 0, 100, 50), 1000, 1000, margin=50)
-        self.assertAlmostEqual(scale, 9.0)
 
     def test_hex_parsing(self):
         self.assertEqual(hex_to_rgb("#ffffff"), (1.0, 1.0, 1.0))
@@ -261,7 +257,17 @@ class RasterTests(unittest.TestCase):
             self.assertEqual(stored, zlib.crc32(kind + payload) & 0xFFFFFFFF, kind)
             seen.append(kind)
             offset += 12 + length
-        self.assertEqual(seen, [b"IHDR", b"IDAT", b"IEND"])
+        self.assertEqual(seen, [b"IHDR", b"pHYs", b"IDAT", b"IEND"])
+
+    def test_physical_size_is_declared(self):
+        """pHYs records the real DPI, so the PNG knows how big it is."""
+        import struct
+        png = render_png(self.scene, dpi=150)
+        index = png.index(b"pHYs")
+        ppm_x, ppm_y, unit = struct.unpack(">IIB", png[index + 4:index + 13])
+        self.assertEqual(unit, 1)  # metres
+        self.assertEqual(ppm_x, ppm_y)
+        self.assertAlmostEqual(ppm_x * 0.0254, 150, delta=1)
 
     def test_pixel_data_decompresses_to_the_declared_size(self):
         import zlib
@@ -373,7 +379,8 @@ class LabelTests(unittest.TestCase):
         right = bounds.x + bounds.w * 0.76
         for text in sheet:
             width = text_width(text.value, text.size)
-            start = text.x if text.anchor == "start" else text.x - width
+            offset = {"start": 0.0, "middle": 0.5, "end": 1.0}[text.anchor]
+            start = text.x - width * offset
             end = start + width
             with self.subTest(text=text.value):
                 self.assertFalse(start < left < end, "text crosses the first rule")

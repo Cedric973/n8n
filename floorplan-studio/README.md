@@ -43,6 +43,10 @@ takes the same JSON body the HTTP API accepts.
 `--units metric` reads `--width` and `--depth` in metres and prints every
 dimension in metres and every area in m². The web UI has the same switch.
 
+`--sheet` and `--scale` override the automatic choice (`--sheet "ANSI C"`,
+`--scale 1:100`). Asking for a scale that will not fit on any sheet is an error
+naming one that will, rather than a drawing that runs off the paper.
+
 ## As a library
 
 ```python
@@ -62,6 +66,31 @@ Footprints can be `rectangle`, `l_shape`, `t_shape`, `u_shape`, or any
 rectilinear `Polygon` you pass vertices for. Room types, target areas, minimum
 dimensions and adjacency preferences all live in `spec.py` and are meant to be
 edited.
+
+## Sheets and scale
+
+Every drawing is laid out on a standard sheet at a standard architectural
+scale, not stretched to fill the page. That is what lets two plans be compared
+side by side, and what lets a scale rule laid on a print read something true: at
+1/4" = 1'-0", a 64 ft building measures exactly 16 inches on paper.
+
+The scale is chosen by working outward from the largest — keeping as much detail
+as the paper allows — and then taking the smallest sheet that holds it. So a
+26 x 22 ft cottage and a 64 x 46 ft house both come out at 1/4" = 1'-0"; the
+cottage simply occupies less of its sheet, which is information rather than
+wasted paper. Only when nothing standard fits does a drawing get fitted to the
+largest sheet, and it is then labelled `NOT TO SCALE` rather than mislabelled.
+
+| | Sheets | Scales |
+|---|---|---|
+| Imperial | ANSI A to D | 1/4", 3/16", 1/8", 3/32", 1/16" = 1'-0" |
+| Metric | A4 to A1 | 1:50, 1:75, 1:100, 1:150, 1:200 |
+
+Scale is carried as points per foot, since the drawing is built in feet and PDF
+measures in points. Both tables fall out of `864 / ratio`, a foot being 864
+points at full size. The PDF page is the sheet, the SVG declares its true size
+in inches or millimetres, and the PNG carries a `pHYs` chunk recording its real
+DPI — so all three print at the scale they claim.
 
 ## Units
 
@@ -141,9 +170,9 @@ serialises that same scene — so the SVG, the PDF and the DXF cannot drift apar
 
 | Output | Notes |
 |---|---|
-| SVG | For the browser and the web UI. |
-| PDF | Hand-written PDF 1.4 writer, Helvetica metrics for correct text placement. |
-| PNG | Hand-written scanline rasteriser and PNG encoder. |
+| SVG | For the browser and the web UI; declares its true physical size. |
+| PDF | Hand-written PDF 1.4 writer; the page is the sheet, at true scale. |
+| PNG | Hand-written scanline rasteriser and PNG encoder, with a real DPI. |
 | DXF | AutoCAD R12 ASCII, 1:1 in model space in feet, on named layers, linework only. |
 | JSON | The full plan: rooms, rects, openings, score breakdown. |
 
@@ -178,6 +207,7 @@ dimensions printed inside each room are the net, inside-face figures.
 | `svg.py` `pdf.py` `dxf.py` `raster.py` | Scene to file |
 | `metrics.py` | Helvetica character widths, for placing and fitting text |
 | `units.py` | Imperial and metric conversion and formatting |
+| `sheet.py` | Sheet sizes and architectural scales |
 | `font.py` | Single-stroke vector font, used only by the rasteriser |
 | `preview.py` | ASCII plan for the terminal |
 | `api.py` | JSON request to spec, shared by the CLI and the server |
@@ -189,13 +219,18 @@ dimensions printed inside each room are the net, inside-face figures.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-130 tests. The layout suite checks the invariants that matter across every
+150 tests. The layout suite checks the invariants that matter across every
 footprint, program and seed: rooms tile the footprint exactly, never overlap,
 never come out with zero area, and the same seed always gives the same plan.
 The circulation suite checks that every returned plan is fully reachable from
 the front door and that no bathroom or closet is a through-route. The export
 suite validates the PDF cross-reference table and stream lengths, DXF group-code
 pairing, PNG chunk CRCs, and SVG well-formedness by parsing it.
+
+The sheet suite checks the property the whole thing exists for: two differently
+sized plans come out at the same points per foot, a small plan takes up less of
+its sheet rather than being blown up, and a known 64 ft length measures exactly
+16 inches on the page.
 
 The units suite checks that conversion happens at the boundary and nowhere else:
 metric output carries no feet marks, imperial output carries no `m²`, and the
@@ -223,9 +258,10 @@ a silently failed patch will look like a passing test.
   structure, egress, energy or your local code, and its output is not a
   construction document.
 - **The PDF has not been opened.** Its structure is validated — cross-reference
-  offsets, stream lengths, escaping — and it shares its geometry with the PNG,
-  which has been looked at. But no PDF viewer was available to render it, so
-  that is the one output whose appearance is inferred rather than seen.
+  offsets, stream lengths, escaping — its page size and scale are asserted, and
+  it shares its geometry with the PNG, which has been looked at. But no PDF
+  viewer was available to render it, so that is the one output whose appearance
+  is inferred rather than seen.
 
 ## License
 

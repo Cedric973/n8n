@@ -15,7 +15,7 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .api import RequestError, catalog, generate_from, replay
+from .api import RequestError, catalog, generate_from, replay, scene_for
 from .dxf import DXF_ENCODING, render_dxf
 from .pdf import render_pdf
 from .raster import render_png
@@ -118,17 +118,18 @@ class Handler(BaseHTTPRequestHandler):
     def _generate(self) -> None:
         payload = self._read_json()
         plans = generate_from(payload)
-        self._json(200, {
-            "variants": [
-                {
-                    "seed": plan.seed,
-                    "summary": plan.summary(),
-                    "svg": render_svg(build_scene(plan), width=940),
-                    "rooms": [room.to_dict() for room in plan.rooms],
-                }
-                for plan in plans
-            ]
-        })
+        variants = []
+        for plan in plans:
+            scene = scene_for(plan, payload)  # one scene per plan, reused below
+            variants.append({
+                "seed": plan.seed,
+                "summary": plan.summary(),
+                "svg": render_svg(scene),
+                "sheet": scene.sheet.name,
+                "scale": scene.scale.label,
+                "rooms": [room.to_dict() for room in plan.rooms],
+            })
+        self._json(200, {"variants": variants})
 
     def _export(self) -> None:
         payload = self._read_json()
@@ -139,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
             raise RequestError("export needs the seed of the variant to rebuild")
         plan = replay(payload, int(payload["seed"]))
         content_type, exporter = EXPORTERS[fmt]
-        body = exporter(build_scene(plan))
+        body = exporter(scene_for(plan, payload))
         stem = "".join(
             c if c.isalnum() or c in "-_" else "-" for c in plan.spec.title.lower()
         ).strip("-") or "floor-plan"

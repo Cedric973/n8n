@@ -18,7 +18,7 @@ import math
 import struct
 import zlib
 
-from .drawing import Path, Scene, Text, fit_scale, hex_to_rgb
+from .drawing import Path, Scene, Text, hex_to_rgb
 from .font import CAP, GLYPH_WIDTH, glyph
 from .metrics import HELVETICA, HELVETICA_BOLD, text_width
 
@@ -115,12 +115,12 @@ class Canvas:
                 target[i + 2] = b // area
         return out
 
-    def to_png(self) -> bytes:
+    def to_png(self, dpi: float | None = None) -> bytes:
         raw = bytearray()
         for y in range(self.height):
             raw.append(0)  # filter type: none
             raw += self.pixels[y * self.stride:(y + 1) * self.stride]
-        return _png(self.width, self.height, bytes(raw))
+        return _png(self.width, self.height, bytes(raw), dpi)
 
 
 def hex_to_rgb_bytes(color: str) -> bytes:
@@ -132,30 +132,45 @@ def _chunk(kind: bytes, payload: bytes) -> bytes:
             + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF))
 
 
-def _png(width: int, height: int, raw: bytes) -> bytes:
+def _png(width: int, height: int, raw: bytes, dpi: float | None = None) -> bytes:
     header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit truecolour
-    return (b"\x89PNG\r\n\x1a\n"
-            + _chunk(b"IHDR", header)
-            + _chunk(b"IDAT", zlib.compress(raw, 6))
-            + _chunk(b"IEND", b""))
+    chunks = [_chunk(b"IHDR", header)]
+    if dpi:
+        # pHYs records pixels per metre, so the image knows its real size.
+        ppm = int(round(dpi / 0.0254))
+        chunks.append(_chunk(b"pHYs", struct.pack(">IIB", ppm, ppm, 1)))
+    chunks.append(_chunk(b"IDAT", zlib.compress(raw, 6)))
+    chunks.append(_chunk(b"IEND", b""))
+    return b"\x89PNG\r\n\x1a\n" + b"".join(chunks)
 
 
 # --------------------------------------------------------------------------
 # scene rendering
 # --------------------------------------------------------------------------
 
-def render_png(scene: Scene, width: int = 1800, margin: float = 24.0,
+def render_png(scene: Scene, width: int | None = None, dpi: float = 150.0,
                supersample: int = 1) -> bytes:
-    """Draw ``scene`` and return PNG bytes."""
+    """Rasterise the scene's sheet. ``width`` in pixels overrides ``dpi``.
+
+    The sheet and the drawing scale come from the scene, so the image is a
+    picture of the page rather than a picture fitted to whatever size was asked
+    for. Only the resolution changes.
+    """
     supersample = max(1, min(int(supersample), 4))
-    scale = fit_scale(scene.bounds, width, width * 4, margin)
-    height = int(round(scene.bounds.h * scale + 2 * margin))
-    canvas = Canvas(int(width) * supersample, height * supersample, scene.background)
-    s = scale * supersample
-    m = margin * supersample
+    sheet_w_in, sheet_h_in = scene.sheet.inches()
+    if width:
+        dpi = int(width) / sheet_w_in
+    pixels_w = max(int(round(sheet_w_in * dpi)), 1)
+    pixels_h = max(int(round(sheet_h_in * dpi)), 1)
+    canvas = Canvas(pixels_w * supersample, pixels_h * supersample, scene.background)
+
+    ppf, off_x, off_y = scene.placement()
+    device = dpi / 72.0 * supersample
+    s = ppf * device
+    page_h = pixels_h * supersample
 
     def px(x: float, y: float) -> tuple[float, float]:
-        return ((x - scene.bounds.x) * s + m, (scene.bounds.y2 - y) * s + m)
+        return (x * s + off_x * device, page_h - (y * s + off_y * device))
 
     for item in scene.items:
         if isinstance(item, Path):
@@ -167,7 +182,7 @@ def render_png(scene: Scene, width: int = 1800, margin: float = 24.0,
         elif isinstance(item, Text):
             _draw_text(canvas, item, px, s)
 
-    return canvas.downsample(supersample).to_png()
+    return canvas.downsample(supersample).to_png(dpi)
 
 
 def _draw_text(canvas: Canvas, text: Text, px, scale: float) -> None:

@@ -10,19 +10,20 @@ the same convention the scene uses, so only a scale and an offset are needed.
 
 from __future__ import annotations
 
-from .drawing import Path, Scene, Text, fit_scale, hex_to_rgb
+from .drawing import Path, Scene, Text, hex_to_rgb
 from .metrics import HELVETICA, HELVETICA_BOLD, text_width
 
-LETTER_LANDSCAPE = (792.0, 612.0)
-MARGIN = 20.0
 MIN_STROKE_PT = 0.25
 
 
-def render_pdf(scene: Scene, page: tuple[float, float] = LETTER_LANDSCAPE) -> bytes:
-    width, height = page
-    scale = fit_scale(scene.bounds, width, height, MARGIN)
-    off_x = (width - scene.bounds.w * scale) / 2.0 - scene.bounds.x * scale
-    off_y = (height - scene.bounds.h * scale) / 2.0 - scene.bounds.y * scale
+def render_pdf(scene: Scene) -> bytes:
+    """Render onto the scene's sheet, at the scene's scale.
+
+    A point is 1/72 inch, and the scale is carried as points per foot, so
+    printing this file at 100% gives a drawing a scale rule can measure.
+    """
+    width, height = scene.sheet.width, scene.sheet.height
+    scale, off_x, off_y = scene.placement()
 
     def pt(x: float, y: float) -> tuple[float, float]:
         return (x * scale + off_x, y * scale + off_y)

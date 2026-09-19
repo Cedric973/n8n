@@ -18,6 +18,7 @@ from .geometry import Rect, Segment
 from .metrics import text_width
 from .units import format_area, format_dimensions, format_length, scale_bar_options
 from .plan import Plan, PlacedRoom
+from .sheet import Scale, Sheet, choose
 
 INK = "#1b1b1b"
 WALL = "#2a2a2a"
@@ -29,16 +30,25 @@ BOTTOM_MARGIN, TOP_MARGIN = 15.0, 9.0
 TITLE_HEIGHT = 5.5
 
 
-def build_scene(plan: Plan, show_dimensions: bool = True) -> Scene:
+def build_scene(plan: Plan, show_dimensions: bool = True,
+                sheet: str | Sheet | None = None,
+                scale: str | Scale | None = None) -> Scene:
+    """Draw ``plan`` onto a standard sheet at a standard architectural scale."""
     bounds = plan.footprint.bounds
+    extent = Rect(
+        bounds.x - LEFT_MARGIN,
+        bounds.y - BOTTOM_MARGIN,
+        bounds.w + LEFT_MARGIN + RIGHT_MARGIN,
+        bounds.h + BOTTOM_MARGIN + TOP_MARGIN,
+    )
+    chosen_sheet, chosen_scale = choose(
+        extent.w, extent.h, plan.spec.units, sheet=sheet, scale=scale
+    )
     scene = Scene(
-        bounds=Rect(
-            bounds.x - LEFT_MARGIN,
-            bounds.y - BOTTOM_MARGIN,
-            bounds.w + LEFT_MARGIN + RIGHT_MARGIN,
-            bounds.h + BOTTOM_MARGIN + TOP_MARGIN,
-        ),
+        bounds=extent,
         title=plan.spec.title,
+        sheet=chosen_sheet,
+        scale=chosen_scale,
     )
     _draw_floors(scene, plan)
     _draw_walls(scene, plan)
@@ -413,7 +423,12 @@ def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
     scene.text(box.x2 - pad, box.y + 1.15, seed,
                size=_fit(seed, box.x2 - issue - 2 * pad, 0.6),
                anchor="end", color=LIGHT, layer="SHEET")
-    _draw_scale_bar(scene, Rect(identity, box.y, issue - identity, box.h), plan.spec.units)
+    cell = Rect(identity, box.y, issue - identity, box.h)
+    _draw_scale_bar(scene, cell, plan.spec.units)
+    if scene.scale is not None:
+        label = f"SCALE  {scene.scale.label}"
+        scene.text(cell.center[0], cell.y2 - 0.85, label,
+                   size=_fit(label, cell.w * 0.92, 0.52), color=INK, layer="SHEET")
 
 
 def _draw_scale_bar(scene: Scene, cell: Rect, units: str = "imperial") -> None:

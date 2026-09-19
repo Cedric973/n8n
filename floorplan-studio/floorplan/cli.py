@@ -52,6 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--out", type=Path, default=Path("plans"))
     out.add_argument("--formats", default="svg,pdf,png,dxf",
                      help=f"comma separated, from {','.join(FORMATS)}")
+    out.add_argument("--sheet", help="sheet size, e.g. 'ANSI C' or 'A3'; default fits the plan")
+    out.add_argument("--scale", help="drawing scale, e.g. '1/4\" = 1'-0\"' or '1:100'")
+    out.add_argument("--dpi", type=float, default=150.0, help="PNG resolution")
     out.add_argument("--preview", action="store_true", help="print an ASCII plan per variant")
     out.add_argument("--quiet", action="store_true")
     return parser
@@ -67,6 +70,7 @@ def payload_from(args: argparse.Namespace) -> dict:
         "office": args.office, "garage": args.garage, "mudroom": args.mudroom,
         "formal_dining": args.formal_dining, "pantry": args.pantry,
         "laundry": args.laundry, "title": args.title, "units": args.units,
+        "sheet": args.sheet, "scale": args.scale,
         "variants": args.variants, "seed": args.seed,
     }
 
@@ -78,15 +82,17 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         print(f"floorplan: unknown format(s): {', '.join(unknown)}", file=sys.stderr)
         return 2
+    payload = payload_from(args)
     try:
-        plans = generate_from(payload_from(args))
+        plans = generate_from(payload)
+        scenes = [build_scene(p, sheet=payload.get("sheet"), scale=payload.get("scale"))
+                  for p in plans]
     except (RequestError, ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"floorplan: {exc}", file=sys.stderr)
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
-    for rank, plan in enumerate(plans, start=1):
-        scene = build_scene(plan)
+    for rank, (plan, scene) in enumerate(zip(plans, scenes), start=1):
         stem = args.out / f"plan-{rank}-seed{plan.seed}"
         written = []
         if "svg" in formats:
@@ -96,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             stem.with_suffix(".pdf").write_bytes(render_pdf(scene))
             written.append("pdf")
         if "png" in formats:
-            stem.with_suffix(".png").write_bytes(render_png(scene))
+            stem.with_suffix(".png").write_bytes(render_png(scene, dpi=args.dpi))
             written.append("png")
         if "dxf" in formats:
             stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding=DXF_ENCODING,
@@ -112,7 +118,8 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"{stem.name}: score {summary['score']:.1f}  "
                 f"{summary['bedrooms']} bed / {summary['bathrooms']} bath  "
-                f"{summary['conditioned_sqft']} sf  -> {', '.join(written)}"
+                f"{summary['conditioned_sqft']} sf  "
+                f"{scene.sheet.name} @ {scene.scale.label}  -> {', '.join(written)}"
             )
         if args.preview:
             print(ascii_plan(plan))

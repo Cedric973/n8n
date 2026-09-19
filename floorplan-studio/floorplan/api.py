@@ -113,6 +113,21 @@ def spec_from(payload: dict[str, Any]) -> PlanSpec:
         raise RequestError(str(exc)) from exc
 
 
+def sheet_options(payload: dict[str, Any]) -> dict[str, Any]:
+    """Optional sheet and scale overrides, validated against the unit system."""
+    return {"sheet": payload.get("sheet") or None, "scale": payload.get("scale") or None}
+
+
+def scene_for(plan: Plan, payload: dict[str, Any]):
+    """Build a scene, turning a bad sheet or scale into a request error."""
+    from .render import build_scene
+
+    try:
+        return build_scene(plan, **sheet_options(payload))
+    except ValueError as exc:
+        raise RequestError(str(exc)) from exc
+
+
 def generate_from(payload: dict[str, Any]) -> list[Plan]:
     spec = spec_from(payload)
     variants = max(1, min(int(payload.get("variants", 3)), MAX_VARIANTS))

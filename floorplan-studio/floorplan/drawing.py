@@ -54,6 +54,20 @@ class Scene:
     items: list[Path | Text] = field(default_factory=list)
     background: str = "#ffffff"
     title: str = "Floor Plan"
+    #: The sheet this scene is drawn on, and the scale it is drawn at. Set by
+    #: :func:`floorplan.render.build_scene`; the backends read them rather than
+    #: fitting the drawing to whatever page they happen to be given.
+    sheet: object | None = None
+    scale: object | None = None
+
+    def placement(self) -> tuple[float, float, float]:
+        """Points per foot and the page offsets that centre the drawing."""
+        if self.sheet is None or self.scale is None:
+            raise ValueError("scene has no sheet; build it with build_scene()")
+        ppf = self.scale.points_per_foot
+        off_x = (self.sheet.width - self.bounds.w * ppf) / 2.0 - self.bounds.x * ppf
+        off_y = (self.sheet.height - self.bounds.h * ppf) / 2.0 - self.bounds.y * ppf
+        return ppf, off_x, off_y
 
     # -- primitives -------------------------------------------------------
 
@@ -95,13 +109,6 @@ class Scene:
 
     def layers(self) -> list[str]:
         return sorted({i.layer for i in self.items})
-
-
-def fit_scale(bounds: Rect, width: float, height: float, margin: float = 0.0) -> float:
-    """Units per foot that fits ``bounds`` into a ``width`` x ``height`` page."""
-    usable_w = max(width - 2 * margin, 1e-6)
-    usable_h = max(height - 2 * margin, 1e-6)
-    return min(usable_w / max(bounds.w, 1e-6), usable_h / max(bounds.h, 1e-6))
 
 
 def hex_to_rgb(color: str) -> tuple[float, float, float]:

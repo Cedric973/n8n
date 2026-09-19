@@ -4,24 +4,35 @@ from __future__ import annotations
 
 from xml.sax.saxutils import escape
 
-from .drawing import Path, Scene, Text, fit_scale
+from .drawing import Path, Scene, Text
 
 MIN_STROKE_PX = 0.6
 
 
-def render_svg(scene: Scene, width: float = 1180.0, margin: float = 16.0) -> str:
-    scale = fit_scale(scene.bounds, width, width * 2, margin)
-    height = scene.bounds.h * scale + 2 * margin
+def render_svg(scene: Scene, metric_page: bool = False) -> str:
+    """Render the sheet, in points, with a true physical size declared.
+
+    The viewBox is the sheet in points and width/height are given in real
+    inches or millimetres, so the file prints at its stated scale while still
+    scaling freely to fit a browser.
+    """
+    width, height = scene.sheet.width, scene.sheet.height
+    scale, off_x, off_y = scene.placement()
 
     def px(x: float, y: float) -> tuple[float, float]:
-        return (
-            (x - scene.bounds.x) * scale + margin,
-            (scene.bounds.y2 - y) * scale + margin,
-        )
+        return (x * scale + off_x, height - (y * scale + off_y))
+
+    if metric_page:
+        page_w, page_h = scene.sheet.millimetres()
+        physical = f'width="{page_w:.1f}mm" height="{page_h:.1f}mm"'
+    else:
+        page_w, page_h = scene.sheet.inches()
+        physical = f'width="{page_w:.2f}in" height="{page_h:.2f}in"'
 
     out = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" '
-        f'height="{height:.0f}" viewBox="0 0 {width:.2f} {height:.2f}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" {physical} '
+        f'viewBox="0 0 {width:.2f} {height:.2f}" '
+        f'preserveAspectRatio="xMidYMid meet" '
         f'font-family="Helvetica, Arial, sans-serif">',
         f'<title>{escape(scene.title)}</title>',
         f'<rect width="100%" height="100%" fill="{scene.background}"/>',
