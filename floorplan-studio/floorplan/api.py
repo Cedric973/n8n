@@ -116,7 +116,10 @@ def spec_from(payload: dict[str, Any]) -> PlanSpec:
 
 def sheet_options(payload: dict[str, Any]) -> dict[str, Any]:
     """Optional sheet and scale overrides, validated against the unit system."""
-    return {"sheet": payload.get("sheet") or None, "scale": payload.get("scale") or None}
+    options = {"sheet": payload.get("sheet") or None, "scale": payload.get("scale") or None}
+    if payload.get("level"):
+        options["level"] = str(payload["level"]).lower()
+    return options
 
 
 def scene_for(plan: Plan, payload: dict[str, Any]):

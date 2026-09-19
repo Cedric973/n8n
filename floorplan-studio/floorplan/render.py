@@ -20,8 +20,12 @@ from .units import format_area, format_dimensions, format_length, scale_bar_opti
 from .plan import Plan, PlacedRoom
 from .sheet import Scale, Sheet, choose
 
+from .levels import CLIENT, DIMENSION, LEVEL_INFO, TECHNICAL
+
 INK = "#1b1b1b"
-WALL = "#2a2a2a"
+WALL = "#1b1b1b"          # exterior walls: the darkest, heaviest thing on the sheet
+WALL_INTERIOR = "#3d3d3d"  # interior walls: a step lighter, and they are thinner too
+GLASS = "#5f7f9c"          # window glazing lines: a quiet blue-grey, still clear in B&W
 LIGHT = "#8a8a8a"
 PAPER = "#ffffff"
 
@@ -32,8 +36,16 @@ TITLE_HEIGHT = 5.5
 
 def build_scene(plan: Plan, show_dimensions: bool = True,
                 sheet: str | Sheet | None = None,
-                scale: str | Scale | None = None) -> Scene:
-    """Draw ``plan`` onto a standard sheet at a standard architectural scale."""
+                scale: str | Scale | None = None,
+                level: str = TECHNICAL,
+                drawing_number: str | None = None,
+                revision: str = "A") -> Scene:
+    """Draw ``plan`` onto a standard sheet at a standard architectural scale.
+
+    ``level`` picks how much goes on the sheet: see :mod:`floorplan.levels`.
+    """
+    if level not in LEVEL_INFO:
+        raise ValueError(f"unknown level {level!r}")
     bounds = plan.footprint.bounds
     extent = Rect(
         bounds.x - LEFT_MARGIN,
@@ -50,15 +62,17 @@ def build_scene(plan: Plan, show_dimensions: bool = True,
         sheet=chosen_sheet,
         scale=chosen_scale,
     )
-    _draw_floors(scene, plan)
+    scene.level = level  # type: ignore[attr-defined]
+    if level != CLIENT:
+        _draw_floors(scene, plan)   # room tints help the technical reader; the client plan stays white
     _draw_walls(scene, plan)
     _punch_openings(scene, plan)
     _draw_symbols(scene, plan)
-    _draw_labels(scene, plan)
+    _draw_labels(scene, plan, level)
     if show_dimensions:
-        _draw_dimensions(scene, plan)
+        _draw_dimensions(scene, plan, level)
     _draw_north(scene, bounds)
-    _draw_title_block(scene, plan, bounds)
+    _draw_title_block(scene, plan, bounds, level, drawing_number or "A-101", revision)
     return scene
 
 
@@ -92,7 +106,7 @@ def _draw_walls(scene: Scene, plan: Plan) -> None:
         for edge in room.rect.edges().values():
             if (edge.x1, edge.y1, edge.x2, edge.y2) in on_boundary:
                 continue  # the exterior shell is drawn once, below
-            scene.rect(_band(edge, spec.interior_wall), fill=WALL, layer="A-WALL")
+            scene.rect(_band(edge, spec.interior_wall), fill=WALL_INTERIOR, layer="A-WALL")
     for edge in plan.footprint.edges():
         scene.rect(_band(edge, spec.exterior_wall), fill=WALL, layer="A-WALL")
 
@@ -181,21 +195,26 @@ def _draw_cased(scene: Scene, plan: Plan, opening) -> None:
 
 
 def _draw_window(scene: Scene, plan: Plan, opening) -> None:
+    """The conventional symbol: an opening in the wall, closed by two thin
+    glazing lines. Nothing about it looks like wall, at any zoom."""
     seg = opening.segment
-    thickness = _opening_thickness(plan, opening.kind)
-    offsets = (-thickness / 2, 0.0, thickness / 2)
-    for i, offset in enumerate(offsets):
-        width = HAIRLINE * (1.4 if i != 1 else 0.9)
+    t = _opening_thickness(plan, opening.kind)
+    # Jambs: short dark ticks across the wall at each end of the opening.
+    for point in ((seg.x1, seg.y1), (seg.x2, seg.y2)):
         if seg.vertical:
-            scene.line(
-                seg.x1 + offset, seg.y1, seg.x1 + offset, seg.y2,
-                stroke=WALL if i != 1 else LIGHT, width=width, layer="A-WIND",
-            )
+            scene.line(point[0] - t / 2, point[1], point[0] + t / 2, point[1],
+                       stroke=WALL, width=HAIRLINE * 1.6, layer="A-WIND")
         else:
-            scene.line(
-                seg.x1, seg.y1 + offset, seg.x2, seg.y1 + offset,
-                stroke=WALL if i != 1 else LIGHT, width=width, layer="A-WIND",
-            )
+            scene.line(point[0], point[1] - t / 2, point[0], point[1] + t / 2,
+                       stroke=WALL, width=HAIRLINE * 1.6, layer="A-WIND")
+    # Glazing: two parallel lines a quarter of the wall in from each face.
+    for offset in (-t / 4, t / 4):
+        if seg.vertical:
+            scene.line(seg.x1 + offset, seg.y1, seg.x1 + offset, seg.y2,
+                       stroke=GLASS, width=HAIRLINE * 0.9, layer="A-WIND")
+        else:
+            scene.line(seg.x1, seg.y1 + offset, seg.x2, seg.y1 + offset,
+                       stroke=GLASS, width=HAIRLINE * 0.9, layer="A-WIND")
 
 
 def _draw_garage(scene: Scene, plan: Plan, opening) -> None:
@@ -245,7 +264,7 @@ def _stack(cx: float, cy: float, offset: float, rotate: float) -> tuple[float, f
     return (cx - offset * math.sin(angle), cy + offset * math.cos(angle))
 
 
-def _draw_labels(scene: Scene, plan: Plan) -> None:
+def _draw_labels(scene: Scene, plan: Plan, level: str = TECHNICAL) -> None:
     for room in plan.rooms:
         if room.rect.area <= 0:
             continue
@@ -265,7 +284,17 @@ def _draw_labels(scene: Scene, plan: Plan) -> None:
         dims = format_dimensions(net.w, net.h, units)
         area = format_area(net.area, units)
         detail_size = min(size * 0.7, _fit(dims, along, size * 0.7), _fit(area, along, size * 0.7))
-        if across >= 4.2 * size and detail_size >= MIN_LABEL:
+        if level == CLIENT:
+            # Name over area, nothing else. The room's sides are on the dimension plan.
+            if across >= 3.0 * size and detail_size >= MIN_LABEL:
+                scene.text(*_stack(cx, cy, size * 0.45, rotate), name, size=size, bold=True,
+                           color=INK, rotate=rotate, layer="A-TEXT")
+                scene.text(*_stack(cx, cy, -size * 0.65, rotate), area, size=detail_size,
+                           color=LIGHT, rotate=rotate, layer="A-TEXT")
+            else:
+                scene.text(cx, cy, name, size=size, bold=True, color=INK,
+                           rotate=rotate, layer="A-TEXT")
+        elif across >= 4.2 * size and detail_size >= MIN_LABEL:
             scene.text(*_stack(cx, cy, size * 0.80, rotate), name, size=size, bold=True,
                        color=INK, rotate=rotate, layer="A-TEXT")
             scene.text(*_stack(cx, cy, -size * 0.30, rotate), dims, size=detail_size,
@@ -358,11 +387,17 @@ def _collapse(values: list[float], tol: float = 0.25) -> list[float]:
     return out
 
 
-def _draw_dimensions(scene: Scene, plan: Plan) -> None:
-    """Dimension all four faces: room-by-room, then the overall run outboard."""
+def _draw_dimensions(scene: Scene, plan: Plan, level: str = TECHNICAL) -> None:
+    """Dimension the faces: room-by-room, then the overall run outboard.
+
+    The client plan dimensions the south and west faces only — enough to read
+    the building's size and its bays without ringing it in numbers. The
+    dimension and technical plans do all four.
+    """
     bounds = plan.footprint.bounds
     units = plan.spec.units
-    for _name, along_x, far in FACES:
+    faces = [f for f in FACES if not (level == CLIENT and f[2])]
+    for _name, along_x, far in faces:
         divisions = _edge_divisions(plan, along_x, far)
         if len(divisions) < 2:
             continue
@@ -390,8 +425,14 @@ def _draw_north(scene: Scene, bounds: Rect) -> None:
     scene.text(cx, cy + 2.4, "N", size=0.72, bold=True, color=INK, layer="G-ANNO")
 
 
-def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
-    """Three ruled cells: identity, scale, issue. Nothing shares a cell."""
+def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect, level: str = TECHNICAL,
+                      drawing_number: str = "A-101", revision: str = "A") -> None:
+    """Three ruled cells: identity, scale, issue. Nothing shares a cell.
+
+    The client and dimension plans carry project information only. The
+    technical plan adds the level's own caption and the seed, which is what
+    lets a reviewer regenerate exactly this sheet.
+    """
     top = bounds.y - 8.0
     box = Rect(bounds.x, top - TITLE_HEIGHT, bounds.w, TITLE_HEIGHT)
     scene.rect(box, stroke=INK, width=HAIRLINE * 1.5, layer="G-ANNO")
@@ -403,26 +444,29 @@ def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
 
     summary = plan.summary()
     pad = 0.7
-    title_size = _fit(plan.spec.title, identity - box.x - 2 * pad, 1.0, bold=True)
+    cell_w = identity - box.x - 2 * pad
+    title_size = _fit(plan.spec.title, cell_w, 1.0, bold=True)
     scene.text(box.x + pad, box.y2 - 1.55, plan.spec.title, size=max(title_size, 0.45),
                bold=True, anchor="start", color=INK, layer="G-ANNO")
 
+    caption = LEVEL_INFO[level][1]
     facts = (
-        f"{summary['bedrooms']} BED   {summary['bathrooms']} BATH   "
-        f"{format_area(plan.conditioned_sqft, plan.spec.units)} CONDITIONED   "
-        f"{summary['rooms']} ROOMS"
+        f"{caption}   ·   {summary['bedrooms']} BED   {summary['bathrooms']} BATH   "
+        f"{format_area(plan.conditioned_sqft, plan.spec.units)}"
     )
-    facts_size = _fit(facts, identity - box.x - 2 * pad, 0.6)
+    if level == TECHNICAL:
+        facts += f"   ·   {summary['rooms']} ROOMS   ·   SEED {plan.seed}"
+    facts_size = _fit(facts, cell_w, 0.6)
     scene.text(box.x + pad, box.y + 1.15, facts, size=max(facts_size, 0.3),
                anchor="start", color=INK, layer="G-ANNO")
 
+    right_w = box.x2 - issue - 2 * pad
     scene.text(box.x2 - pad, box.y2 - 1.5, date.today().isoformat(),
-               size=_fit(date.today().isoformat(), box.x2 - issue - 2 * pad, 0.6),
+               size=_fit(date.today().isoformat(), right_w, 0.6),
                anchor="end", color=LIGHT, layer="G-ANNO")
-    seed = f"SCHEMATIC · SEED {plan.seed}"
-    scene.text(box.x2 - pad, box.y + 1.15, seed,
-               size=_fit(seed, box.x2 - issue - 2 * pad, 0.6),
-               anchor="end", color=LIGHT, layer="G-ANNO")
+    number = f"{drawing_number}   REV {revision}"
+    scene.text(box.x2 - pad, box.y + 1.15, number, size=_fit(number, right_w, 0.6),
+               anchor="end", color=INK, layer="G-ANNO")
     cell = Rect(identity, box.y, issue - identity, box.h)
     _draw_scale_bar(scene, cell, plan.spec.units)
     if scene.scale is not None:

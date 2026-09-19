@@ -8,6 +8,7 @@ from ..dxf import DXF_ENCODING, render_dxf
 from ..pdf import render_pdf
 from ..raster import render_png
 from ..svg import render_svg
+from ..levels import LEVELS, LEVEL_INFO
 from ..units import DEFAULT_UNITS
 from .analyze import analyze
 from .clean import clean
@@ -55,8 +56,14 @@ def page_count(path: str | Path) -> int:
 
 def convert_file(path: str | Path, formats=("pdf", "dxf"), out_dir: str | Path = "converted",
                  sheet=None, scale=None, page: int = 1, units: str = DEFAULT_UNITS,
-                 dpi: float = 150.0, multipage: bool = False) -> dict:
-    """Convert one source page; returns the report, which lists every file written."""
+                 dpi: float = 150.0, multipage: bool = False, levels=None,
+                 drawing_number: str | None = None, revision: str = "A") -> dict:
+    """Convert one source page; returns the report, which lists every file written.
+
+    Each requested level (client, dimension, technical) is written in each
+    requested format, keyed ``"<level>_<format>"`` in the report's outputs.
+    """
+    levels = list(levels or LEVELS)
     formats = [f.lower() for f in formats]
     bad = [f for f in formats if f not in FORMATS]
     if bad:
@@ -69,24 +76,30 @@ def convert_file(path: str | Path, formats=("pdf", "dxf"), out_dir: str | Path =
         report["page"] = page
         return report
 
-    scene = build_drawing_scene(drawing, sheet=sheet, scale=scale, units=units)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     suffix = f"-p{page}" if multipage else ""
-    stem = out / (Path(path).stem + suffix + "-clean")
     written: dict[str, str] = {}
-    if "pdf" in formats:
-        stem.with_suffix(".pdf").write_bytes(render_pdf(scene)); written["pdf"] = str(stem.with_suffix(".pdf"))
-    if "dxf" in formats:
-        stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding=DXF_ENCODING, errors="replace")
-        written["dxf"] = str(stem.with_suffix(".dxf"))
-    if "svg" in formats:
-        stem.with_suffix(".svg").write_text(render_svg(scene), encoding="utf-8"); written["svg"] = str(stem.with_suffix(".svg"))
-    if "png" in formats:
-        stem.with_suffix(".png").write_bytes(render_png(scene, dpi=dpi)); written["png"] = str(stem.with_suffix(".png"))
+    scene = None
+    for level in levels:
+        scene = build_drawing_scene(drawing, sheet=sheet, scale=scale, units=units, level=level,
+                                    drawing_number=drawing_number, revision=revision)
+        stem = out / f"{Path(path).stem}{suffix}-{LEVEL_INFO[level][0]}"
+        for fmt in formats:
+            target = stem.with_suffix("." + fmt)
+            if fmt == "pdf":
+                target.write_bytes(render_pdf(scene))
+            elif fmt == "dxf":
+                target.write_text(render_dxf(scene), encoding=DXF_ENCODING, errors="replace")
+            elif fmt == "svg":
+                target.write_text(render_svg(scene), encoding="utf-8")
+            elif fmt == "png":
+                target.write_bytes(render_png(scene, dpi=dpi))
+            written[f"{level}_{fmt}"] = str(target)
 
     report = build_report(drawing, written)
     report["page"] = page
+    report["levels"] = levels
     report["sheet_type"] = drawing.metadata.get("sheet_type", "unknown")
     report["sheet"] = scene.sheet.name
     report["output_scale"] = scene.scale.label

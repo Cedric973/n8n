@@ -341,7 +341,7 @@ def _walls_from_hatching(d: Drawing) -> int:
         for idx in touched:
             if hits[idx] < 255:
                 hits[idx] += 1
-    solid = bytearray(1 if v >= 2 else 0 for v in hits)
+    solid = _close_mask(bytearray(1 if v >= 2 else 0 for v in hits), hits, w, h)
 
     # Connected components of solid cells.
     label = [0] * (w * h)
@@ -396,6 +396,34 @@ def _walls_from_hatching(d: Drawing) -> int:
     d.note(f"reconstructed {len(accepted)} wall region(s) as {made} rectangles from "
            f"{consumed} hatch strokes the export had flattened them into")
     return made
+
+
+def _close_mask(solid: bytearray, hits: bytearray, w: int, h: int) -> bytearray:
+    """Fill the pinholes a sparse hatch leaves in a wall band.
+
+    Where the strokes are far apart a cell inside the wall is crossed only
+    once, or not at all, and the band comes out speckled. A cell most of whose
+    neighbours are solid is inside the band: fill it when one stroke touched
+    it and two neighbours agree, or when no stroke did and three agree. Two
+    passes close the two-cell gaps that the first pass narrows.
+    """
+    for _ in range(2):
+        grown = bytearray(solid)
+        for i in range(w * h):
+            if solid[i]:
+                continue
+            cx, cy = i % w, i // w
+            around = 0
+            if cx + 1 < w and solid[i + 1]: around += 1
+            if cx > 0 and solid[i - 1]: around += 1
+            if cy + 1 < h and solid[i + w]: around += 1
+            if cy > 0 and solid[i - w]: around += 1
+            if around >= 3 or (around >= 2 and hits[i] >= 1):
+                grown[i] = 1
+        if grown == solid:
+            break
+        solid = grown
+    return solid
 
 
 def _cells_to_rects(cells: list[int], w: int, x0: float, y0: float) -> list[list[tuple[float, float]]]:
@@ -479,10 +507,14 @@ def _infer_geometry(d: Drawing) -> None:
                 e.center, e.radius = fit[0], fit[1]
                 doors += 1
 
+    # Glazing lines sit a few centimetres apart inside a wall — exactly what
+    # the parallel-pair wall rule below would also match. Windows go first.
+    windows = _infer_windows(d)
+
     # Parallel pairs a wall's width apart, overlapping along most of their
     # length. Lines are bucketed by direction and sorted by offset, so each one
     # is compared only with neighbours a wall's width away, not with everything.
-    long_lines = [e for e in lines if e.length >= 0.5]
+    long_lines = [e for e in lines if e.length >= 0.5 and e.role == Role.OTHER]
     by_dir: dict[int, list[tuple[float, Entity]]] = {}
     for e in long_lines:
         a, b = e.points
@@ -516,9 +548,66 @@ def _infer_geometry(d: Drawing) -> None:
                 break
 
     _prune_stray_walls(d)
-    for label, n in (("walls", walls), ("doors", doors), ("columns", columns)):
+    for label, n in (("walls", walls), ("doors", doors), ("columns", columns), ("windows", windows)):
         if n:
             d.note(f"inferred {n} {label} from geometry (not confirmed by layer names)")
+
+
+WINDOW_LINES = (0.03, 0.45)   # metres between the glazing lines of one window
+
+
+def _infer_windows(d: Drawing) -> int:
+    """Two or three thin parallel lines, close together, lying in a wall: a window.
+
+    Doors were found by their swing. Windows have no swing; what they have is
+    glazing drawn as a pair (or triple) of lines a few centimetres apart, of
+    the same length, sitting in the line of a wall — where nothing else is
+    drawn that way.
+    """
+    walls = [b for b in (e.bounds() for e in d.by_role(Role.WALL)) if b]
+    if not walls:
+        return 0
+    cand = [e for e in d.entities if e.kind == "line" and e.role == Role.OTHER
+            and 0.45 <= e.length <= 4.0 and not e.meta.get("hatch_stroke")]
+    by_dir: dict[int, list[tuple[float, Entity]]] = {}
+    for e in cand:
+        a, b = e.points
+        rad = math.radians(angle(a, b))
+        by_dir.setdefault(int(angle(a, b) // 2), []).append((-a[0] * math.sin(rad) + a[1] * math.cos(rad), e))
+
+    def in_wall(e: Entity, slack: float = 0.12) -> bool:
+        b = e.bounds()
+        return any(b[0] >= wb[0] - slack and b[2] <= wb[2] + slack and b[1] >= wb[1] - slack
+                   and b[3] <= wb[3] + slack for wb in walls)
+
+    found = 0
+    used: set[int] = set()
+    for group in by_dir.values():
+        group.sort(key=lambda r: r[0])
+        for i, (off_p, p) in enumerate(group):
+            if id(p) in used:
+                continue
+            mates = []
+            for off_q, q in group[i + 1:]:
+                if off_q - off_p > WINDOW_LINES[1]:
+                    break
+                if id(q) in used or off_q - off_p < WINDOW_LINES[0]:
+                    continue
+                if abs(q.length - p.length) > 0.25 * p.length:
+                    continue
+                if overlap(*p.points, *q.points) < 0.75 * min(p.length, q.length):
+                    continue
+                mates.append(q)
+            if not mates:
+                continue
+            members = [p] + mates[:2]
+            if not all(in_wall(m) for m in members):
+                continue
+            for m in members:
+                m.role, m.provenance = Role.WINDOW, Provenance.INFERRED
+                used.add(id(m))
+            found += 1
+    return found
 
 
 def _polygon_area(pts) -> float:

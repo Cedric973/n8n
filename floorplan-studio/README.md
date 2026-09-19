@@ -56,6 +56,32 @@ has the same switch.
 `--scale 1:100`). Asking for a scale that will not fit on any sheet is an error
 naming one that will, rather than a drawing that runs off the paper.
 
+## Three drawings from one plan
+
+Every plan — generated or converted — is issued at three levels, each on its
+own sheet, because a client, a builder and a checker do not want the same
+drawing:
+
+| Level | File suffix | Caption | What is on it |
+|---|---|---|---|
+| client | `01-client` | FLOOR PLAN | Walls, doors, windows, room name + area. Dimensions on two faces only. No provenance vocabulary. |
+| dimension | `02-dimension` | DIMENSION PLAN | The client plan plus every dimension chain and the source's own figures. |
+| technical | `03-technical` | TECHNICAL PLAN | Everything: furniture, grids, inferred geometry dashed and tinted, quality grade and VERIFIED / CALCULATED / INFERRED / UNKNOWN counts in the title block. |
+
+`--level client,dimension,technical` (default `all`) picks which to write;
+`--drawing-number` and `--revision` fill the title block. The web UI previews
+the client plan and offers downloads grouped by level.
+
+The line hierarchy is the same at every level: exterior walls heaviest,
+interior walls lighter, a window is a clear opening with two thin glazing
+lines, a door is its leaf and a thin swing arc. Colour is used sparingly and
+only where the drawing still reads in black and white. No text is printed
+smaller than 2 mm on the sheet, whatever size it had in the source.
+
+The words VERIFIED, INFERRED and so on never appear on the client or dimension
+plan. They belong to the technical plan and the conversion report, which is
+where a checker looks for them.
+
 ## Converting an existing plan
 
 ```bash
@@ -336,7 +362,7 @@ dimensions printed inside each room are the net, inside-face figures.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-154 tests. The layout suite checks the invariants that matter across every
+210 tests. The layout suite checks the invariants that matter across every
 footprint, program and seed: rooms tile the footprint exactly, never overlap,
 never come out with zero area, and the same seed always gives the same plan.
 The circulation suite checks that every returned plan is fully reachable from
@@ -381,6 +407,13 @@ a silently failed patch will look like a passing test.
 - **Schematic only.** This is a massing and layout tool. It knows nothing about
   structure, egress, energy or your local code, and its output is not a
   construction document.
+- **No automated readability test.** The 100 / 50 / 25 % zoom check is done
+  by looking at the PNG. What is enforced is the 2 mm text floor and the line
+  hierarchy; the PNG exists so the rest can be seen.
+- **Word spacing in converted labels is a guess.** A PDF font with no space
+  glyph hands over `KitchenLunchRoom`; the client and dimension plans put a
+  space back before each capital or digit, the technical plan keeps the source
+  text as it was. `Rentedspace 2` is as far as that rule can go.
 - **The PDF has not been opened.** Its structure is validated — cross-reference
   offsets, stream lengths, escaping — its page size and scale are asserted, and
   it shares its geometry with the PNG, which has been looked at. But no PDF

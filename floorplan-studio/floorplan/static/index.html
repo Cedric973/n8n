@@ -145,6 +145,12 @@
       </div>
       <label for="title">Title</label>
       <input type="text" id="title" value="Untitled Plan" maxlength="80">
+      <label for="level" style="margin-top:10px">Download as</label>
+      <select id="level">
+        <option value="client" selected>Client plan — walls, openings, names, areas</option>
+        <option value="dimension">Dimension plan — every chain, room sizes</option>
+        <option value="technical">Technical plan — everything, with provenance</option>
+      </select>
       <button class="primary" id="go" type="submit">Generate plans</button>
       <div class="error" id="error" hidden></div>
     </section>
@@ -459,7 +465,7 @@
   function download(body, seed, fmt, button) {
     var original = button.textContent;
     button.textContent = "…";
-    var request = Object.assign({}, body, { seed: seed, format: fmt });
+    var request = Object.assign({}, body, { seed: seed, format: fmt, level: $("level").value });
     fetch("/api/export", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request)
@@ -513,13 +519,24 @@
       '<span class="badge">units ' + (r.detected_units || "unknown") + " · " + r.units_provenance + "</span>" +
       '<span class="badge">verified ' + sum(r.verified_elements) + " · inferred " + sum(r.inferred_elements) + "</span>" +
       '<span class="spacer"></span>';
-    var dl = document.createElement("span"); dl.className = "downloads";
+    head.appendChild(document.createElement("span")); card.appendChild(head);
+    var groups = {};
     Object.keys(d.downloads).forEach(function (k) {
-      var a = document.createElement("a"); a.className = "mini"; a.href = d.downloads[k];
-      a.textContent = k.replace("report_", "report ").toUpperCase(); a.style.textDecoration = "none";
-      dl.appendChild(a);
+      var parts = k.split("_"); var g = parts.length > 1 && parts[0] !== "report" ? parts[0] : "report";
+      (groups[g] = groups[g] || []).push(k);
     });
-    head.appendChild(dl); card.appendChild(head);
+    var bar = document.createElement("div"); bar.className = "card-head";
+    ["client", "dimension", "technical", "report"].forEach(function (g) {
+      if (!groups[g]) return;
+      var label = document.createElement("span"); label.className = "stats";
+      label.textContent = g.charAt(0).toUpperCase() + g.slice(1) + ":"; bar.appendChild(label);
+      groups[g].forEach(function (k) {
+        var a = document.createElement("a"); a.className = "mini"; a.href = d.downloads[k];
+        a.textContent = k.replace(g + "_", "").replace("report_", "").toUpperCase(); a.style.textDecoration = "none";
+        bar.appendChild(a);
+      });
+    });
+    card.appendChild(bar);
     if (r.warnings && r.warnings.length) {
       var w = document.createElement("div"); w.className = "error"; w.style.margin = "12px 16px 0";
       w.innerHTML = "<strong>Warnings</strong><br>" + r.warnings.map(function (x) { return "• " + x; }).join("<br>");

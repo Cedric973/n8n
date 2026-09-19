@@ -334,6 +334,37 @@ class AnalyzerTests(unittest.TestCase):
         plain = next(e for e in d.entities if e.kind == "line" and e.length > 5)
         self.assertNotEqual(plain.role, Role.WALL)
 
+    def test_sparse_hatch_gives_a_solid_band_not_a_speckled_one(self):
+        """Strokes far enough apart that some cells see only one of them
+        still come back as one solid rectangle, not a band full of pinholes."""
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        strokes = []
+        x = 0.0
+        while x < 6.0:  # 45° strokes 0.04 m apart on a 0.05 m grid: some cells
+            strokes.append(Entity("line", [(x, 0.0), (x + 0.2, 0.2)]))   # see one stroke, some two
+            x += 0.04
+        d.entities = strokes + [Entity("text", [(3, 1.5)], text="Office", height=0.2)]
+        d = analyze(d)
+        walls = [e for e in d.entities if e.role == Role.WALL and e.meta.get("hatch")]
+        self.assertTrue(walls, "no wall region reconstructed from the sparse hatching")
+        area = sum(abs((e.points[2][0] - e.points[0][0]) * (e.points[2][1] - e.points[0][1])) for e in walls)
+        self.assertGreater(area, 0.9 * 6.0 * 0.2, "the band has holes in it")
+        self.assertLess(len(walls), 12, "the band came out as a pile of slivers")
+
+    def test_windows_inferred_from_glazing_lines_in_a_wall(self):
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        wall = [(0, 0), (10, 0), (10, 0.25), (0, 0.25)]
+        d.entities = [Entity("polyline", wall, closed=True, filled=True),
+                      Entity("line", [(3, 0.08), (4.2, 0.08)]),   # glazing pair in the wall
+                      Entity("line", [(3, 0.17), (4.2, 0.17)]),
+                      Entity("line", [(6, 3.0), (7.2, 3.0)]),     # a pair out in the room: furniture
+                      Entity("line", [(6, 3.1), (7.2, 3.1)]),
+                      Entity("text", [(5, 2)], text="Office", height=0.2)]
+        d = analyze(d)
+        windows = d.by_role(Role.WINDOW)
+        self.assertEqual(len(windows), 2)
+        self.assertTrue(all(e.points[0][1] < 0.25 for e in windows))
+
     def test_sheet_type_is_inferred_from_its_words(self):
         for words, expected in ((["Living 18.4 m²"], "plan"), (["Elevation A-A"], "elevation/section"),
                                 (["Door schedule", "lever handle"], "schedule")):
@@ -388,13 +419,15 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(source=fmt):
                 report = convert_file(Fixture.paths()[fmt], formats=("pdf", "dxf", "svg", "png"), out_dir=out)
                 self.assertEqual(report["reconstruction_performed"], "YES")
-                self.assertEqual(set(report["outputs"]), {"pdf", "dxf", "svg", "png", "report_md", "report_json"})
-                pdf = Path(report["outputs"]["pdf"]).read_bytes()
+                expected = {f"{lvl}_{f}" for lvl in ("client", "dimension", "technical")
+                            for f in ("pdf", "dxf", "svg", "png")} | {"report_md", "report_json"}
+                self.assertEqual(set(report["outputs"]), expected)
+                pdf = Path(report["outputs"]["client_pdf"]).read_bytes()
                 self.assertTrue(pdf.startswith(b"%PDF") and pdf.rstrip().endswith(b"%%EOF"))
-                dxf = Path(report["outputs"]["dxf"]).read_text(encoding=DXF_ENCODING)
+                dxf = Path(report["outputs"]["technical_dxf"]).read_text(encoding=DXF_ENCODING)
                 self.assertIn("A-WALL", dxf)
                 self.assertEqual(dxf.splitlines()[-1], "EOF")
-                png = Path(report["outputs"]["png"]).read_bytes()
+                png = Path(report["outputs"]["client_png"]).read_bytes()
                 self.assertTrue(png.startswith(b"\x89PNG"))
                 loaded = json.loads(Path(report["outputs"]["report_json"]).read_text())
                 for key in ("source_quality", "detected_scale", "detected_units", "verified_elements",
@@ -404,7 +437,7 @@ class PipelineTests(unittest.TestCase):
     def test_report_markdown_has_the_required_sections(self):
         from floorplan.convert.pipeline import convert_file
         out = Path(tempfile.mkdtemp(prefix="fp-conv-"))
-        report = convert_file(Fixture.paths()["svg"], formats=("svg",), out_dir=out)
+        report = convert_file(Fixture.paths()["svg"], formats=("svg",), out_dir=out, levels=["client"])
         md = Path(report["outputs"]["report_md"]).read_text()
         for heading in ("Source file", "Source quality", "Detected discipline", "Detected scale",
                         "Detected units", "Output format", "Reconstruction performed",
@@ -415,10 +448,61 @@ class PipelineTests(unittest.TestCase):
         from floorplan.convert.readers.svg import read_svg
         from floorplan.convert.render import build_drawing_scene
         d = analyze(clean(read_svg(Fixture.paths()["svg"])))
-        scene = build_drawing_scene(d)
+        scene = build_drawing_scene(d, level="technical")
         doors = [p for p in scene.paths if p.layer == "A-DOOR" and p.stroke]
         self.assertTrue(doors)
         self.assertTrue(all(p.dash for p in doors), "inferred doors must be dashed")
+
+    def test_client_plan_hides_provenance_and_clutter(self):
+        """Presentation drawing: no AI vocabulary, no dashed inference, no ceiling heights."""
+        from floorplan.convert.readers.svg import read_svg
+        from floorplan.convert.render import build_drawing_scene
+        d = analyze(clean(read_svg(Fixture.paths()["svg"])))
+        client = build_drawing_scene(d, level="client")
+        words = " ".join(t.value for t in client.texts).upper()
+        for banned in ("INFERRED", "VERIFIED", "CALCULATED", "UNKNOWN", "QUALITY"):
+            self.assertNotIn(banned, words)
+        self.assertIn("FLOOR PLAN", words)
+        self.assertIn("A-101", words)
+        self.assertFalse(any(p.dash for p in client.paths), "nothing is dashed on the client plan")
+        technical = build_drawing_scene(d, level="technical")
+        self.assertIn("INFERRED", " ".join(t.value for t in technical.texts).upper())
+        self.assertLess(len(client.items), len(technical.items))
+
+    def test_client_plan_keeps_room_labels_and_drops_captions(self):
+        """A room label is a name stacked over an area. A caption with no area
+        under it — a furniture tag, a "to be precised" note — is not a room."""
+        from floorplan.convert.render import display_text, room_labels
+        name = Entity("text", [(4.0, 3.0)], text="KitchenLunchRoom", height=0.28, role=Role.TEXT)
+        area = Entity("text", [(4.6, 2.65)], text="40.09m2", height=0.19, role=Role.TEXT)
+        ceiling = Entity("text", [(4.5, 2.35)], text="ceil.height:2.48m", height=0.19, role=Role.TEXT)
+        pod = Entity("text", [(9.0, 3.0)], text="OfficePod", height=0.16, role=Role.TEXT)
+        pod2 = Entity("text", [(9.0, 2.8)], text="for1p.", height=0.16, role=Role.TEXT)
+        note = Entity("text", [(1.0, 6.0)], text="TOBEPRECISED", height=0.28, role=Role.TEXT)
+        far = Entity("text", [(4.0, 5.0)], text="Office", height=0.28, role=Role.TEXT)  # 2 m above
+        kept = room_labels([name, area, ceiling, pod, pod2, note, far])
+        self.assertEqual(kept, {id(name), id(area)})
+        self.assertEqual(display_text("KitchenLunchRoom"), "Kitchen Lunch Room")
+        self.assertEqual(display_text("Meetingroom1"), "Meetingroom 1")
+        self.assertEqual(display_text("40.09m2"), "40.09m2")           # the 2 of m2 stays put
+        self.assertEqual(display_text("Salle de bain"), "Salle de bain")  # already spaced
+
+    def test_text_is_never_printed_smaller_than_two_millimetres(self):
+        """The source's 1 mm dimension figures are printed at a size a reader
+        can make out at the chosen scale."""
+        from floorplan.convert.render import build_drawing_scene
+        from floorplan.units import FEET_PER_METRE
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        d.entities = [Entity("polyline", [(0, 0), (12, 0), (12, 0.25), (0, 0.25)], closed=True, filled=True),
+                      Entity("polyline", [(0, 8), (12, 8), (12, 8.25), (0, 8.25)], closed=True, filled=True),
+                      Entity("text", [(6, 4)], text="Office", height=0.25),
+                      Entity("text", [(6, 3.6)], text="40.00m2", height=0.25),
+                      Entity("text", [(6, 1)], text="2497", height=0.05, role=Role.DIMENSION)]
+        d = analyze(d)
+        scene = build_drawing_scene(d, level="dimension")
+        dim = next(t for t in scene.texts if t.value == "2497")
+        paper_mm = dim.size / FEET_PER_METRE / scene.scale.ratio * 1000.0
+        self.assertGreaterEqual(paper_mm, 1.99)
 
     def test_source_sheet_furniture_is_not_redrawn(self):
         """One title block, one north arrow, one scale bar: ours, not the source's."""
@@ -491,8 +575,8 @@ class ServerConvertTests(unittest.TestCase):
         self.assertEqual(status, 200, data)
         self.assertEqual(data["report"]["source_quality"], "GOOD")
         self.assertTrue(data["svg"].startswith("<svg"))
-        self.assertEqual(set(data["downloads"]) >= {"pdf", "dxf", "svg", "report_md", "report_json"}, True)
-        with urllib.request.urlopen(self.base + data["downloads"]["pdf"], timeout=30) as response:
+        self.assertTrue({"client_pdf", "technical_dxf", "dimension_svg", "report_md", "report_json"} <= set(data["downloads"]))
+        with urllib.request.urlopen(self.base + data["downloads"]["client_pdf"], timeout=30) as response:
             self.assertEqual(response.status, 200)
             self.assertTrue(response.read().startswith(b"%PDF"))
             self.assertIn("attachment", response.headers["Content-Disposition"])

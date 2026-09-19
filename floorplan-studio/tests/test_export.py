@@ -238,6 +238,61 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class LevelTests(unittest.TestCase):
+    """Three sheets from one plan, each saying less or more."""
+
+    def setUp(self):
+        self.plan = sample_plan()
+
+    def test_client_plan_is_the_quiet_one(self):
+        client = build_scene(self.plan, level="client")
+        technical = build_scene(self.plan, level="technical")
+        labels = [t.value for t in client.texts if t.layer == "A-TEXT"]
+        self.assertFalse(any(" x " in v for v in labels), "no width x depth on the client plan")
+        self.assertTrue(any("m\u00b2" in v or "SF" in v for v in labels), "areas stay")
+        words = " ".join(t.value for t in client.texts).upper()
+        self.assertNotIn("SEED", words)
+        self.assertIn("FLOOR PLAN", words)
+        self.assertIn("A-101", words)
+        self.assertNotIn("A-AREA", client.layers())      # no room tints
+        self.assertLess(len([t for t in client.texts if t.layer == "A-DIMS"]),
+                        len([t for t in technical.texts if t.layer == "A-DIMS"]))
+
+    def test_client_plan_dimensions_two_faces_only(self):
+        from floorplan.render import _edge_divisions
+        client = build_scene(self.plan, level="client")
+        bounds = self.plan.footprint.bounds
+        dims = [t for t in client.texts if t.layer == "A-DIMS"]
+        self.assertTrue(all(t.y < bounds.y or t.x < bounds.x for t in dims),
+                        "client dimensions sit south and west only")
+
+    def test_dimension_plan_has_every_chain_and_room_sizes(self):
+        dim = build_scene(self.plan, level="dimension")
+        labels = [t.value for t in dim.texts if t.layer == "A-TEXT"]
+        self.assertTrue(any(" x " in v for v in labels))
+        self.assertIn("DIMENSION PLAN", " ".join(t.value for t in dim.texts))
+
+    def test_windows_are_gap_plus_two_glazing_lines(self):
+        from floorplan.render import GLASS, WALL
+        scene = build_scene(self.plan, level="client")
+        glazing = [p for p in scene.paths if p.layer == "A-WIND" and p.stroke == GLASS]
+        jambs = [p for p in scene.paths if p.layer == "A-WIND" and p.stroke == WALL]
+        windows = [o for o in self.plan.openings if o.kind == "window"]
+        self.assertEqual(len(glazing), 2 * len(windows))
+        self.assertEqual(len(jambs), 2 * len(windows))
+        self.assertTrue(all(p.width < jambs[0].width for p in glazing), "glazing thinner than jambs")
+
+    def test_exterior_walls_darker_than_interior(self):
+        from floorplan.render import WALL, WALL_INTERIOR
+        scene = build_scene(self.plan, level="client")
+        fills = {p.fill for p in scene.paths if p.layer == "A-WALL"}
+        self.assertEqual(fills, {WALL, WALL_INTERIOR})
+
+    def test_unknown_level_is_refused(self):
+        with self.assertRaises(ValueError):
+            build_scene(self.plan, level="marketing")
+
+
 class RasterTests(unittest.TestCase):
     """The PNG backend, and the layout defects it was built to catch."""
 

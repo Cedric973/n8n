@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .api import RequestError, generate_from
+from .levels import LEVEL_INFO, parse_levels
 from .units import DEFAULT_EXTENT, DEFAULT_UNITS, format_area
 from .dxf import DXF_ENCODING, render_dxf
 from .pdf import render_pdf
@@ -57,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--sheet", help="sheet size, e.g. 'ANSI C' or 'A3'; default fits the plan")
     out.add_argument("--scale", help="drawing scale, e.g. '1/4\" = 1'-0\"' or '1:100'")
     out.add_argument("--dpi", type=float, default=150.0, help="PNG resolution")
+    out.add_argument("--level", default="all",
+                     help="client, dimension, technical, a comma list, or all (default)")
+    out.add_argument("--drawing-number", default="A-101")
+    out.add_argument("--revision", default="A")
     out.add_argument("--preview", action="store_true", help="print an ASCII plan per variant")
     out.add_argument("--quiet", action="store_true")
     return parser
@@ -95,6 +100,10 @@ def build_convert_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sheet", help="force a sheet size, e.g. 'A3' or 'ANSI C'")
     parser.add_argument("--scale", help="force a drawing scale, e.g. '1:100'")
     parser.add_argument("--dpi", type=float, default=150.0)
+    parser.add_argument("--level", default="all",
+                        help="client, dimension, technical, a comma list, or all (default)")
+    parser.add_argument("--drawing-number", default="A-101")
+    parser.add_argument("--revision", default="A")
     parser.add_argument("--quiet", action="store_true")
     return parser
 
@@ -108,11 +117,14 @@ def convert_main(argv: list[str]) -> int:
         print(f"floorplan: no such file: {args.source}", file=sys.stderr)
         return 1
     try:
+        levels = parse_levels(args.level)
+        extra = dict(levels=levels, drawing_number=args.drawing_number, revision=args.revision)
         if args.pages:
             from .convert.pipeline import convert_pages
             pages = None if args.pages.strip().lower() == "all" else [int(p) for p in args.pages.split(",")]
             summary = convert_pages(args.source, pages=pages, formats=formats, out_dir=args.out,
-                                    sheet=args.sheet, scale=args.scale, units=args.units, dpi=args.dpi)
+                                    sheet=args.sheet, scale=args.scale, units=args.units, dpi=args.dpi,
+                                    **extra)
             if not args.quiet:
                 print(f"{args.source.name}: {len(summary['pages_converted'])} of "
                       f"{summary['pages_in_source']} page(s)")
@@ -123,7 +135,8 @@ def convert_main(argv: list[str]) -> int:
                 print(f"  summary     {summary['summary_json']}")
             return 0 if all(r.get("reconstruction_performed") == "YES" for r in summary["reports"]) else 2
         report = convert_file(args.source, formats=formats, out_dir=args.out, sheet=args.sheet,
-                              scale=args.scale, page=args.page, units=args.units, dpi=args.dpi)
+                              scale=args.scale, page=args.page, units=args.units, dpi=args.dpi,
+                              **extra)
     except (UnsupportedSource, ValueError, ImportError, OSError) as exc:
         print(f"floorplan: {exc}", file=sys.stderr)
         return 1
@@ -154,42 +167,46 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     payload = payload_from(args)
     try:
+        levels = parse_levels(args.level)
         plans = generate_from(payload)
-        scenes = [build_scene(p, sheet=payload.get("sheet"), scale=payload.get("scale"))
-                  for p in plans]
     except (RequestError, ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"floorplan: {exc}", file=sys.stderr)
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
-    for rank, (plan, scene) in enumerate(zip(plans, scenes), start=1):
-        stem = args.out / f"plan-{rank}-seed{plan.seed}"
+    for rank, plan in enumerate(plans, start=1):
         written = []
-        if "svg" in formats:
-            stem.with_suffix(".svg").write_text(render_svg(scene), encoding="utf-8")
-            written.append("svg")
-        if "pdf" in formats:
-            stem.with_suffix(".pdf").write_bytes(render_pdf(scene))
-            written.append("pdf")
-        if "png" in formats:
-            stem.with_suffix(".png").write_bytes(render_png(scene, dpi=args.dpi))
-            written.append("png")
-        if "dxf" in formats:
-            stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding=DXF_ENCODING,
-                                                errors="replace")
-            written.append("dxf")
+        scene = None
+        for level in levels:
+            try:
+                scene = build_scene(plan, sheet=payload.get("sheet"), scale=payload.get("scale"),
+                                    level=level, drawing_number=args.drawing_number,
+                                    revision=args.revision)
+            except ValueError as exc:
+                print(f"floorplan: {exc}", file=sys.stderr)
+                return 1
+            stem = args.out / f"plan-{rank}-seed{plan.seed}-{LEVEL_INFO[level][0]}"
+            if "svg" in formats:
+                stem.with_suffix(".svg").write_text(render_svg(scene), encoding="utf-8")
+            if "pdf" in formats:
+                stem.with_suffix(".pdf").write_bytes(render_pdf(scene))
+            if "png" in formats:
+                stem.with_suffix(".png").write_bytes(render_png(scene, dpi=args.dpi))
+            if "dxf" in formats:
+                stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding=DXF_ENCODING,
+                                                    errors="replace")
+            written.append(stem.name)
         if "json" in formats:
-            stem.with_suffix(".json").write_text(
-                json.dumps(plan.to_dict(), indent=2), encoding="utf-8"
-            )
-            written.append("json")
+            (args.out / f"plan-{rank}-seed{plan.seed}.json").write_text(
+                json.dumps(plan.to_dict(), indent=2), encoding="utf-8")
         if not args.quiet:
             summary = plan.summary()
             print(
-                f"{stem.name}: score {summary['score']:.1f}  "
+                f"plan-{rank}-seed{plan.seed}: score {summary['score']:.1f}  "
                 f"{summary['bedrooms']} bed / {summary['bathrooms']} bath  "
                 f"{format_area(plan.conditioned_sqft, plan.spec.units)}  "
-                f"{scene.sheet.name} @ {scene.scale.label}  -> {', '.join(written)}"
+                f"{scene.sheet.name} @ {scene.scale.label}  -> {', '.join(formats)} x "
+                f"{', '.join(levels)}"
             )
         if args.preview:
             print(ascii_plan(plan))

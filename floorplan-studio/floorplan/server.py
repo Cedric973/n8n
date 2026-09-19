@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .api import RequestError, catalog, generate_from, replay, scene_for
+from .levels import CLIENT, LEVELS
 from .dxf import DXF_ENCODING, render_dxf
 from .pdf import render_pdf
 from .raster import render_png
@@ -131,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
         plans = generate_from(payload)
         variants = []
         for plan in plans:
-            scene = scene_for(plan, payload)  # one scene per plan, reused below
+            scene = scene_for(plan, dict(payload, level=CLIENT))  # the preview is the client plan
             variants.append({
                 "seed": plan.seed,
                 "summary": plan.summary(),
@@ -150,13 +151,16 @@ class Handler(BaseHTTPRequestHandler):
         if payload.get("seed") is None:
             raise RequestError("export needs the seed of the variant to rebuild")
         plan = replay(payload, int(payload["seed"]))
+        level = str(payload.get("level") or CLIENT).lower()
+        if level not in LEVELS:
+            raise RequestError(f"unknown level {level!r}; use one of {', '.join(LEVELS)}")
         content_type, exporter = EXPORTERS[fmt]
-        body = exporter(scene_for(plan, payload))
+        body = exporter(scene_for(plan, dict(payload, level=level)))
         stem = "".join(
             c if c.isalnum() or c in "-_" else "-" for c in plan.spec.title.lower()
         ).strip("-") or "floor-plan"
         self._send(200, body, content_type, {
-            "Content-Disposition": f'attachment; filename="{stem}-seed{plan.seed}.{fmt}"'
+            "Content-Disposition": f'attachment; filename="{stem}-seed{plan.seed}-{level}.{fmt}"'
         })
 
 
@@ -221,8 +225,10 @@ class Handler(BaseHTTPRequestHandler):
         while len(store) > KEEP_CONVERSIONS:
             store.pop(next(iter(store)))
         svg = ""
-        if "svg" in report["outputs"]:
-            svg = Path(report["outputs"]["svg"]).read_text(encoding="utf-8")
+        preview = report["outputs"].get("client_svg") or next(
+            (p for k, p in report["outputs"].items() if k.endswith("_svg")), None)
+        if preview:
+            svg = Path(preview).read_text(encoding="utf-8")
         downloads = {fmt: f"/api/converted/{token}/{Path(p).name}" for fmt, p in report["outputs"].items()}
         self._json(200, {"report": report, "svg": svg, "downloads": downloads})
 
