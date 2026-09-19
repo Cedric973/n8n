@@ -89,6 +89,7 @@ def build_convert_parser() -> argparse.ArgumentParser:
     parser.add_argument("--to", default="pdf,dxf", help="comma separated: pdf,dxf,svg,png")
     parser.add_argument("--out", type=Path, default=Path("converted"))
     parser.add_argument("--page", type=int, default=1, help="PDF page to read")
+    parser.add_argument("--pages", help="'all' or a list like 1,3,4: convert several pages")
     parser.add_argument("--units", default=DEFAULT_UNITS, choices=("imperial", "metric"),
                         help="presentation units for the re-issued sheet")
     parser.add_argument("--sheet", help="force a sheet size, e.g. 'A3' or 'ANSI C'")
@@ -107,6 +108,20 @@ def convert_main(argv: list[str]) -> int:
         print(f"floorplan: no such file: {args.source}", file=sys.stderr)
         return 1
     try:
+        if args.pages:
+            from .convert.pipeline import convert_pages
+            pages = None if args.pages.strip().lower() == "all" else [int(p) for p in args.pages.split(",")]
+            summary = convert_pages(args.source, pages=pages, formats=formats, out_dir=args.out,
+                                    sheet=args.sheet, scale=args.scale, units=args.units, dpi=args.dpi)
+            if not args.quiet:
+                print(f"{args.source.name}: {len(summary['pages_converted'])} of "
+                      f"{summary['pages_in_source']} page(s)")
+                for row in summary["pages"]:
+                    print(f"  p{row['page']:<3} {row['sheet_type']:<18} {str(row['quality']):<11} "
+                          f"scale {row['scale'] or 'unknown'} [{row['scale_provenance']}]"
+                          + (f"  ERROR {row['error']}" if row['error'] else ""))
+                print(f"  summary     {summary['summary_json']}")
+            return 0 if all(r.get("reconstruction_performed") == "YES" for r in summary["reports"]) else 2
         report = convert_file(args.source, formats=formats, out_dir=args.out, sheet=args.sheet,
                               scale=args.scale, page=args.page, units=args.units, dpi=args.dpi)
     except (UnsupportedSource, ValueError, ImportError, OSError) as exc:

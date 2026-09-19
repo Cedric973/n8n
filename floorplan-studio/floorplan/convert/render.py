@@ -73,6 +73,8 @@ def _bounds(entities: list[Entity]) -> tuple[float, float, float, float]:
 
 
 def _draw_entity(scene: Scene, e: Entity, f: float) -> None:
+    if e.meta.get("hatch_stroke"):
+        return  # its region is drawn as a solid wall instead
     layer = AIA_LAYER[e.role]
     inferred = e.provenance == Provenance.INFERRED
     ink = INFERRED_INK if inferred else INK
@@ -80,7 +82,7 @@ def _draw_entity(scene: Scene, e: Entity, f: float) -> None:
     pts = [(x * f, y * f) for x, y in e.points]
 
     if e.kind == "text":
-        if not e.text:
+        if not e.text or e.meta.get("unreadable"):
             return
         size = max((e.height or 0.25) * f, 0.3)
         x, y = pts[0]

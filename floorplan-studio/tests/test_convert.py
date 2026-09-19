@@ -234,6 +234,35 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(d.units, "paper")
         self.assertEqual(d.quality, "POOR")  # re-issuable, but only at paper size
 
+    def test_only_pure_lengths_calibrate(self):
+        """A ceiling height or a pod size is not a plan dimension."""
+        from floorplan.convert.analyze import _is_pure_length
+        for text in ("3.98 m", "12'-6\"", "3600", "1,20 m"):
+            self.assertTrue(_is_pure_length(text), text)
+        for text in ("ceil.height:2.48m", "1.00x1.05m", "11.88m2", "12", "150000", "REV 2"):
+            self.assertFalse(_is_pure_length(text), text)
+
+    def test_disagreeing_dimensions_do_not_make_a_scale(self):
+        """Readings scattered over 80% are noise, and must leave the scale unknown."""
+        from floorplan.convert.readers.svg import read_svg
+        d = read_svg(Fixture.paths()["svg"])
+        d.entities = [e for e in d.entities if not (e.kind == "text" and "SCALE" in (e.text or "").upper())]
+        # Corrupt half the dimension strings so they no longer match their ticks.
+        from floorplan.convert.analyze import _is_pure_length
+        n = 0
+        for e in d.entities:
+            if e.kind == "text" and e.text and _is_pure_length(e.text):
+                if n % 2 == 0:
+                    e.text = f"{float(e.text[:-2]) * 3:.2f} m"
+                n += 1
+        d = analyze(clean(d))
+        # The dimensions must not yield a scale. Room areas may still infer one,
+        # and must say so; what is forbidden is a CALCULATED scale from noise.
+        self.assertNotEqual(d.scale_provenance, Provenance.CALCULATED)
+        self.assertNotIn("calculated from dimension strings", " ".join(d.notes))
+        if d.scale_provenance == Provenance.INFERRED:
+            self.assertIn("room-area", " ".join(d.notes))
+
     def test_layer_names_are_believed(self):
         d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
         d.entities = [Entity("line", [(0, 0), (5, 0)], layer="A-WALL"),
@@ -256,6 +285,63 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(len(walls), 2)
         self.assertTrue(all(e.provenance == Provenance.INFERRED for e in walls))
         self.assertAlmostEqual(walls[0].thickness, 0.2, places=3)
+
+    def test_bare_millimetre_dimensions_calibrate(self):
+        """CAD writes "3600" for 3.6 m; that must calibrate like "3.60 m" does."""
+        from floorplan.convert.readers.svg import read_svg
+        d = read_svg(Fixture.paths()["svg"])
+        for e in d.entities:
+            if e.kind == "text" and "SCALE" in (e.text or "").upper():
+                e.text = "REV A"
+            elif e.kind == "text" and e.text and e.text.endswith(" m") and " x " not in e.text:
+                e.text = str(int(round(float(e.text[:-2]) * 1000)))
+        d = analyze(clean(d))
+        self.assertEqual(d.scale_provenance, Provenance.CALCULATED)
+        self.assertAlmostEqual(float(d.scale_label.split(":")[1]), Fixture.paths()["scene"].scale.ratio,
+                               delta=Fixture.paths()["scene"].scale.ratio * 0.05)
+
+    def test_thin_filled_polygon_is_a_wall_whatever_its_vertex_count(self):
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        snake = [(0, 0), (8, 0), (8, 6), (7.8, 6), (7.8, 0.2), (0, 0.2)]  # an L-shaped wall run
+        d.entities = [Entity("polyline", snake, closed=True, filled=True),
+                      Entity("polyline", [(0, 3), (3, 3), (3, 6), (0, 6)], closed=True, filled=True),  # a slab
+                      Entity("text", [(4, 3)], text="Kitchen", height=0.2)]
+        d = analyze(d)
+        self.assertEqual(d.entities[0].role, Role.WALL)
+        self.assertAlmostEqual(d.entities[0].thickness, 0.2, delta=0.03)
+        self.assertNotEqual(d.entities[1].role, Role.WALL)
+
+    def test_walls_drawn_as_hatch_strokes_are_reconstructed(self):
+        """A 0.2 m band of 45° hairlines 0.02 m apart is a wall, not 300 lines."""
+        import math
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        strokes = []
+        x = 0.0
+        while x < 6.0:  # a horizontal wall band from (0,0) to (6,0.2)
+            strokes.append(Entity("line", [(x, 0.0), (min(x + 0.2, 6.0), min(0.2, 6.0 - x))]))
+            x += 0.02
+        d.entities = strokes + [Entity("text", [(3, 1.5)], text="Office", height=0.2),
+                                Entity("line", [(0, 3), (6, 3)])]  # an ordinary line stays a line
+        d = analyze(d)
+        walls = [e for e in d.entities if e.role == Role.WALL and e.meta.get("hatch")]
+        self.assertTrue(walls, "no wall region reconstructed from the hatching")
+        xs = [p[0] for e in walls for p in e.points]; ys = [p[1] for e in walls for p in e.points]
+        self.assertAlmostEqual(max(xs) - min(xs), 6.0, delta=0.15)
+        self.assertAlmostEqual(max(ys) - min(ys), 0.2, delta=0.12)
+        # analyze() returns a copy, so look the entities up in the result.
+        consumed = [e for e in d.entities if e.kind == "line" and e.length < 0.5]
+        self.assertTrue(consumed and all(e.meta.get("hatch_stroke") for e in consumed))
+        plain = next(e for e in d.entities if e.kind == "line" and e.length > 5)
+        self.assertNotEqual(plain.role, Role.WALL)
+
+    def test_sheet_type_is_inferred_from_its_words(self):
+        for words, expected in ((["Living 18.4 m²"], "plan"), (["Elevation A-A"], "elevation/section"),
+                                (["Door schedule", "lever handle"], "schedule")):
+            d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+            d.entities = [Entity("line", [(0, 0), (5, 0)])] + [
+                Entity("text", [(1, 1)], text=w, height=0.2) for w in words]
+            with self.subTest(words=words):
+                self.assertEqual(analyze(d).metadata["sheet_type"], expected)
 
     def test_units_inferred_from_magnitude(self):
         d = Drawing(units=None)

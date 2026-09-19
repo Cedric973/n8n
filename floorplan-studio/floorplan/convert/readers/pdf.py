@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..model import Drawing, Entity, Provenance, Role
 
+_CID = re.compile(r"\(cid:\d+\)")
 _SCALE_RATIO = re.compile(r"\b1\s*[:/]\s*(\d{2,4})\b")
 _SCALE_IMPERIAL = re.compile(r"(\d+(?:/\d+)?)\s*(?:\"|″|in)\s*=\s*1\s*'?-?\s*0?\s*(?:\"|″|')?")
 
@@ -53,6 +54,7 @@ def read_pdf(path: str | Path, page: int = 1) -> Drawing:
 
     images = 0
     counter = [0]
+    unreadable = [0]
 
     def sid() -> str:
         counter[0] += 1
@@ -74,9 +76,18 @@ def read_pdf(path: str | Path, page: int = 1) -> Drawing:
                 else:
                     size = chars[0].size if chars else obj.height
                     origin = (obj.x0, obj.y0)
-                drawing.entities.append(Entity(
+                entity = Entity(
                     "text", [origin], text=text, height=size,
-                    rotation=90.0 if vertical else 0.0, role=Role.TEXT, source_id=sid()))
+                    rotation=90.0 if vertical else 0.0, role=Role.TEXT, source_id=sid())
+                if _CID.search(text):
+                    # A font with no ToUnicode map: the glyphs exist on the page
+                    # but their meaning cannot be recovered. Keep the position,
+                    # mark it unknown, and never draw the placeholder string.
+                    entity.text = _CID.sub("\ufffd", text).strip() or "\ufffd"
+                    entity.provenance = Provenance.UNKNOWN
+                    entity.meta["unreadable"] = True
+                    unreadable[0] += 1
+                drawing.entities.append(entity)
             return
         if isinstance(obj, LTTextContainer):
             for child in obj:
@@ -114,6 +125,11 @@ def read_pdf(path: str | Path, page: int = 1) -> Drawing:
     walk(layout)
     if images:
         drawing.note(f"{images} raster image(s) on the page were not vectorised")
+    if unreadable[0]:
+        total = sum(1 for e in drawing.entities if e.kind == "text")
+        drawing.metadata["unreadable_text"] = unreadable[0]
+        drawing.note(f"{unreadable[0]} of {total} text lines use a font with no Unicode mapping "
+                     "and cannot be read; they are reported as UNKNOWN and not redrawn")
     paths = [e for e in drawing.entities if e.kind != "text"]
     if not paths:
         drawing.note("page contains no vector geometry" + (" — likely a scan" if images else ""))

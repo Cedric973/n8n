@@ -8,6 +8,8 @@ in the drawing's notes with a count, so the report can say what was done.
 
 from __future__ import annotations
 
+import math
+
 from .geometry import angle, angle_diff, length, project
 from .model import Drawing, Entity
 
@@ -91,51 +93,49 @@ def _snap(e: Entity) -> int:
 
 
 def _merge_collinear(entities: list[Entity]) -> list[Entity]:
-    """Join lines that share an endpoint, a direction, a layer and a role."""
+    """Join lines that share a direction, an offset, a layer and a role.
+
+    Lines are bucketed by direction and by their perpendicular offset from the
+    origin, so only lines that could possibly be collinear are compared; each
+    bucket is then swept once along its direction, merging runs that touch or
+    overlap. Linear-ish, where the obvious pairwise loop is quadratic and
+    stalls on a real drawing's fifteen thousand segments.
+    """
     lines = [e for e in entities if e.kind == "line"]
     others = [e for e in entities if e.kind != "line"]
-    by_group: dict[tuple, list[Entity]] = {}
+    buckets: dict[tuple, list[tuple[float, float, Entity]]] = {}
     for e in lines:
-        by_group.setdefault((e.layer, e.role, e.filled), []).append(e)
+        a, b = e.points
+        ang = angle(a, b)
+        rad = math.radians(ang)
+        ux, uy = math.cos(rad), math.sin(rad)
+        offset = -a[0] * uy + a[1] * ux          # signed distance of the line from the origin
+        s0, s1 = a[0] * ux + a[1] * uy, b[0] * ux + b[1] * uy
+        key = (e.layer, e.role, e.filled, round(ang / 0.25), round(offset / MERGE_GAP))
+        buckets.setdefault(key, []).append((min(s0, s1), max(s0, s1), e))
 
     merged: list[Entity] = []
-    for group in by_group.values():
-        pool = list(group)
-        changed = True
-        while changed:
-            changed = False
-            for i in range(len(pool)):
-                for j in range(i + 1, len(pool)):
-                    joined = _join(pool[i], pool[j])
-                    if joined is not None:
-                        pool[i] = joined
-                        pool.pop(j)
-                        changed = True
-                        break
-                if changed:
-                    break
-        merged.extend(pool)
+    for key, runs in buckets.items():
+        runs.sort(key=lambda r: r[0])
+        cur_lo, cur_hi, cur = runs[0]
+        for lo, hi, e in runs[1:]:
+            if lo <= cur_hi + MERGE_GAP:
+                cur_hi = max(cur_hi, hi)
+            else:
+                merged.append(_span(cur, cur_lo, cur_hi))
+                cur_lo, cur_hi, cur = lo, hi, e
+        merged.append(_span(cur, cur_lo, cur_hi))
     return merged + others
 
 
-def _join(p: Entity, q: Entity) -> Entity | None:
-    a, b = p.points
-    c, d = q.points
-    if angle_diff(angle(a, b), angle(c, d)) > 0.2:
-        return None
-    # q's endpoints must lie on p's line, and the two must touch or overlap.
-    _, off_c = project(c, a, b)
-    _, off_d = project(d, a, b)
-    if abs(off_c) > MERGE_GAP or abs(off_d) > MERGE_GAP:
-        return None
-    la = length(a, b)
-    s_c, _ = project(c, a, b)
-    s_d, _ = project(d, a, b)
-    lo, hi = min(s_c, s_d), max(s_c, s_d)
-    if hi < -MERGE_GAP or lo > la + MERGE_GAP:
-        return None
-    start, end = min(0.0, lo), max(la, hi)
-    ux, uy = (b[0] - a[0]) / la, (b[1] - a[1]) / la
-    out = Entity(**{k: v for k, v in p.__dict__.items()})
-    out.points = [(a[0] + ux * start, a[1] + uy * start), (a[0] + ux * end, a[1] + uy * end)]
+def _span(template: Entity, lo: float, hi: float) -> Entity:
+    """``template``'s line, re-cut to run from ``lo`` to ``hi`` along its direction."""
+    a, b = template.points
+    rad = math.radians(angle(a, b))
+    ux, uy = math.cos(rad), math.sin(rad)
+    offset = -a[0] * uy + a[1] * ux
+    px, py = -uy * offset, ux * offset            # foot of the perpendicular from the origin
+    out = Entity(**{k: v for k, v in template.__dict__.items()})
+    out.meta = dict(template.meta)
+    out.points = [(px + ux * lo, py + uy * lo), (px + ux * hi, py + uy * hi)]
     return out

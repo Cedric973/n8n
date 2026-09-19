@@ -37,6 +37,7 @@ def build_report(drawing: Drawing, outputs: dict[str, str], reconstructed: bool 
         "calculated_elements": by_prov[Provenance.CALCULATED.value],
         "inferred_elements": by_prov[Provenance.INFERRED.value],
         "unknown_elements": {"unclassified_entities": unknown_roles,
+                             "unreadable_text_lines": drawing.metadata.get("unreadable_text", 0),
                              **by_prov[Provenance.UNKNOWN.value]},
         "layers_in_source": drawing.layers(),
         "warnings": warnings,

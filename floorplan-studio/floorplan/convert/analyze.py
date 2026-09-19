@@ -51,6 +51,15 @@ _IMPERIAL_LEN = re.compile(r"(\d+)'\s*-?\s*(\d+(?:\.\d+)?)?\"?")
 _SCALE_RATIO = re.compile(r"\b1\s*[:/]\s*(\d{2,4})\b")
 _SCALE_IMPERIAL = re.compile(r"(\d+(?:/\d+)?)\s*(?:\"|″|in)\s*=\s*1\s*'?-?\s*0?\s*(?:\"|″|')?")
 
+MIN_CALIBRATION_SAMPLES = 3
+MAX_CALIBRATION_SPREAD = 0.08   # readings must agree this closely to be a scale
+_PURE_LENGTH = re.compile(r"^\s*(?:\d{3,5}|\d+(?:[.,]\d+)?\s*(?:mm|cm|m)|\d+'\s*-?\s*\d*\"?)\s*$")
+
+
+def _is_pure_length(text: str) -> bool:
+    return bool(_PURE_LENGTH.match(text))
+
+
 WALL_THICKNESS = (0.06, 0.60)   # metres
 MIN_WALL_RUN = 0.9              # a filled band shorter than this is a symbol, not a wall
 DOOR_RADIUS = (0.55, 1.30)
@@ -64,9 +73,14 @@ def analyze(drawing: Drawing) -> Drawing:
     metres.notes = list(drawing.notes)
     _classify_by_layer(metres)
     _classify_text(metres)
-    _infer_geometry(metres)
-    _separate_sheet_furniture(metres)
+    if metres.units == "paper":
+        metres.note("walls and doors were not inferred: without a scale, a wall's width "
+                    "and a door's radius cannot be recognised")
+    else:
+        _infer_geometry(metres)
+        _separate_sheet_furniture(metres)
     metres.metadata["disciplines"] = _disciplines(metres)
+    metres.metadata["sheet_type"] = _sheet_type(metres)
     metres.metadata["counts"] = metres.counts()
     metres.metadata["provenance"] = metres.provenance_counts()
     # The extent that matters is the drawing without the source's own sheet
@@ -149,6 +163,12 @@ def _resolve_scale(d: Drawing) -> None:
                     d.note(f"scale {d.scale_label} read from sheet text")
                     break
 
+    nts = any(re.search(r"\bN\.?T\.?S\.?\b", e.text or "", re.I) for e in d.texts())
+    if nts:
+        d.metadata["not_to_scale"] = True
+        d.note("WARNING: the sheet is marked N.T.S. (not to scale); no measured scale can be "
+               "better than inferred")
+
     calibrated = _calibrate(d, per_unit)
     printed = d.metadata.get("scale_ratio")
     if printed:
@@ -163,13 +183,36 @@ def _resolve_scale(d: Drawing) -> None:
         d.scale_provenance = Provenance.CALCULATED
         d.note(f"scale 1:{calibrated:.0f} calculated from dimension strings against their tick marks")
     else:
-        d.scale_provenance = Provenance.UNKNOWN
-        d.units = "paper"
-        d.note("no printed scale and no readable dimensions: geometry is in paper metres, "
-               "not building metres")
+        from .calibrate import calibrate_by_areas
+        areas = calibrate_by_areas(d, per_unit)
+        enough = areas and areas["agreeing"] >= max(4, (areas["samples"] + 1) // 2)
+        if enough and areas["spread"] <= 0.25:
+            ratio = areas["ratio"]
+            d.to_metres = per_unit * ratio
+            d.scale_label = f"1:{ratio:.0f}"
+            d.scale_provenance = Provenance.INFERRED
+            d.metadata["area_calibration"] = areas
+            d.note(f"scale 1:{ratio:.0f} inferred from {areas['agreeing']} of {areas['samples']} "
+                   f"room-area labels that agree to {areas['spread']:.0%}; furniture inside rooms "
+                   "biases this small, so treat as approximate")
+        else:
+            d.scale_provenance = Provenance.UNKNOWN
+            d.units = "paper"
+            if areas:
+                d.metadata["area_calibration"] = areas
+                d.note(f"room-area labels gave a scale near 1:{areas['ratio']:.0f} but only "
+                       f"{areas['agreeing']} of {areas['samples']} rooms agree; not used")
+            d.note("no printed scale and no readable dimensions: geometry is in paper metres, "
+                   "not building metres")
+    if nts and d.scale_provenance in (Provenance.VERIFIED, Provenance.CALCULATED):
+        d.scale_provenance = Provenance.INFERRED
 
 
 def _real_length(text: str) -> float | None:
+    from .calibrate import bare_millimetres
+    bare = bare_millimetres(text)
+    if bare is not None:
+        return bare
     m = _METRIC_LEN.search(text)
     if m:
         value = float(m.group(1).replace(",", "."))
@@ -189,6 +232,8 @@ def _calibrate(d: Drawing, per_unit: float) -> float | None:
             ticks.append((a, b, length(a, b)))
     ratios: list[float] = []
     for t in d.texts():
+        if not _is_pure_length(t.text or ""):
+            continue
         real = _real_length(t.text or "")
         h = t.height or 0.0
         if real is None or h <= 0:
@@ -223,10 +268,12 @@ def _calibrate(d: Drawing, per_unit: float) -> float | None:
     spread = (max(middle) - min(middle)) / median if median else 1.0
     d.metadata["calibration_samples"] = len(ratios)
     d.metadata["calibration_spread"] = round(spread, 4)
-    if len(ratios) == 1:
-        d.note("scale calibrated from a single dimension; treat as low confidence")
-    elif spread > 0.04:
-        d.note(f"dimension readings disagree by {spread:.0%}; scale is low confidence")
+    # Readings that do not agree are not a scale; they are noise that happened
+    # to look like dimensions. Only a tight cluster of several is believed.
+    if len(ratios) < MIN_CALIBRATION_SAMPLES or spread > MAX_CALIBRATION_SPREAD:
+        d.note(f"{len(ratios)} dimension reading(s) spread {spread:.0%}: not enough agreement "
+               "to establish a scale from them")
+        return None
     return median
 
 
@@ -252,23 +299,169 @@ def _classify_text(d: Drawing) -> None:
             e.role = Role.DIMENSION
 
 
+HATCH_CELL = 0.05        # metres; a hatched region is sampled on this grid
+HATCH_MAX_STROKE = 0.8   # metres; hatch strokes are short, geometry is not
+
+
+def _walls_from_hatching(d: Drawing) -> int:
+    """Recover walls that a PDF export drew as solid or 45° hatching.
+
+    CAD plot drivers flatten a SOLID or ANSI31 hatch into hundreds of hairline
+    strokes a tenth of a millimetre apart. No single stroke is a wall, and no
+    pair of them is a parallel wall face, so the geometric rules see nothing.
+    Seen as a whole they are dense: sampled on a coarse grid, cells crossed by
+    two or more strokes are solid, connected solid cells are a region, and a
+    region with a wall's thickness is a wall. The region is handed back as
+    rectangles — strips merged where their runs agree — so it exports to CAD
+    as linework rather than as the thousand strokes it came from.
+    """
+    strokes = [e for e in d.entities if e.kind == "line" and e.role == Role.OTHER
+               and not e.filled and (e.lineweight or 0.0) <= 0.05 and 0 < e.length <= HATCH_MAX_STROKE]
+    if len(strokes) < 50:
+        return 0
+    box = d.bounds()
+    if not box:
+        return 0
+    x0, y0 = box[0], box[1]
+    w = int((box[2] - x0) / HATCH_CELL) + 2
+    h = int((box[3] - y0) / HATCH_CELL) + 2
+    if w * h > 4_000_000:
+        return 0
+    hits = bytearray(w * h)
+    for e in strokes:
+        (ax, ay), (bx, by) = e.points
+        n = max(int(e.length / (HATCH_CELL / 2)), 1)
+        touched: set[int] = set()   # one stroke counts once per cell, however it wobbles
+        for i in range(n + 1):
+            t = i / n
+            cx = int((ax + (bx - ax) * t - x0) / HATCH_CELL)
+            cy = int((ay + (by - ay) * t - y0) / HATCH_CELL)
+            if 0 <= cx < w and 0 <= cy < h:
+                touched.add(cy * w + cx)
+        for idx in touched:
+            if hits[idx] < 255:
+                hits[idx] += 1
+    solid = bytearray(1 if v >= 2 else 0 for v in hits)
+
+    # Connected components of solid cells.
+    label = [0] * (w * h)
+    regions: list[list[int]] = []
+    for start in range(w * h):
+        if not solid[start] or label[start]:
+            continue
+        regions.append([])
+        stack = [start]
+        label[start] = len(regions)
+        while stack:
+            i = stack.pop()
+            regions[-1].append(i)
+            cx, cy = i % w, i // w
+            for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                if 0 <= nx < w and 0 <= ny < h:
+                    j = ny * w + nx
+                    if solid[j] and not label[j]:
+                        label[j] = len(regions)
+                        stack.append(j)
+
+    accepted: set[int] = set()
+    made = 0
+    for number, cells in enumerate(regions, start=1):
+        area = len(cells) * HATCH_CELL ** 2
+        boundary = 0
+        for i in cells:
+            cx, cy = i % w, i // w
+            for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                if not (0 <= nx < w and 0 <= ny < h) or not solid[ny * w + nx]:
+                    boundary += 1
+        perimeter = boundary * HATCH_CELL
+        thickness = 2.0 * area / perimeter if perimeter else 0.0
+        if not (WALL_THICKNESS[0] <= thickness <= WALL_THICKNESS[1]) or area < MIN_WALL_RUN * thickness:
+            continue
+        accepted.add(number)
+        for rect in _cells_to_rects(cells, w, x0, y0):
+            d.entities.append(Entity("polyline", rect, closed=True, filled=True, layer="hatch",
+                                     role=Role.WALL, provenance=Provenance.INFERRED,
+                                     thickness=thickness, meta={"hatch": True}))
+            made += 1
+    if not accepted:
+        return 0
+    consumed = 0
+    for e in strokes:
+        (ax, ay), (bx, by) = e.points
+        cx, cy = int(((ax + bx) / 2 - x0) / HATCH_CELL), int(((ay + by) / 2 - y0) / HATCH_CELL)
+        if 0 <= cx < w and 0 <= cy < h and label[cy * w + cx] in accepted:
+            e.role, e.provenance = Role.WALL, Provenance.INFERRED
+            e.meta["hatch_stroke"] = True
+            consumed += 1
+    d.note(f"reconstructed {len(accepted)} wall region(s) as {made} rectangles from "
+           f"{consumed} hatch strokes the export had flattened them into")
+    return made
+
+
+def _cells_to_rects(cells: list[int], w: int, x0: float, y0: float) -> list[list[tuple[float, float]]]:
+    """Row runs of cells, merged upward where consecutive rows share a run."""
+    rows: dict[int, list[int]] = {}
+    for i in cells:
+        rows.setdefault(i // w, []).append(i % w)
+    runs: dict[int, list[tuple[int, int]]] = {}
+    for cy, xs in rows.items():
+        xs.sort()
+        out = []
+        start = prev = xs[0]
+        for x in xs[1:]:
+            if x != prev + 1:
+                out.append((start, prev)); start = x
+            prev = x
+        out.append((start, prev))
+        runs[cy] = out
+    rects: list[list[tuple[float, float]]] = []
+    open_runs: dict[tuple[int, int], int] = {}   # (x0, x1) -> row it started on
+    for cy in range(min(rows), max(rows) + 2):
+        current = set(runs.get(cy, []))
+        for key, start_row in list(open_runs.items()):
+            if key not in current:
+                rects.append(_rect(key, start_row, cy - 1, x0, y0))
+                del open_runs[key]
+        for key in current:
+            open_runs.setdefault(key, cy)
+    return rects
+
+
+def _rect(key, r0, r1, x0, y0):
+    c = HATCH_CELL
+    ax, bx = x0 + key[0] * c, x0 + (key[1] + 1) * c
+    ay, by = y0 + r0 * c, y0 + (r1 + 1) * c
+    return [(ax, ay), (bx, ay), (bx, by), (ax, by)]
+
+
 def _infer_geometry(d: Drawing) -> None:
+    _walls_from_hatching(d)
     lines = [e for e in d.entities if e.kind == "line" and e.role == Role.OTHER]
     walls = doors = columns = 0
 
     # Filled thin rectangles: wall bands as a print driver or this package draws them.
     for e in d.entities:
-        if e.role != Role.OTHER or e.kind != "polyline" or not e.closed or len(e.points) != 4:
+        if e.role != Role.OTHER or e.kind != "polyline" or not e.closed or not e.filled:
             continue
-        if not _is_rectangle(e.points):
+        if len(e.points) == 4 and _is_rectangle(e.points):
+            sides = sorted((length(e.points[0], e.points[1]), length(e.points[1], e.points[2])))
+            if WALL_THICKNESS[0] <= sides[0] <= WALL_THICKNESS[1] and sides[1] >= MIN_WALL_RUN:
+                e.role, e.provenance, e.thickness = Role.WALL, Provenance.INFERRED, sides[0]
+                walls += 1
+            elif 0.15 <= sides[0] <= 0.9 and sides[1] / sides[0] < 2.0:
+                e.role, e.provenance = Role.COLUMN, Provenance.INFERRED
+                columns += 1
             continue
-        sides = sorted((length(e.points[0], e.points[1]), length(e.points[1], e.points[2])))
-        if e.filled and WALL_THICKNESS[0] <= sides[0] <= WALL_THICKNESS[1] and sides[1] >= MIN_WALL_RUN:
-            e.role, e.provenance, e.thickness = Role.WALL, Provenance.INFERRED, sides[0]
+        # Any other filled outline: a long thin one is a wall run. For a strip,
+        # thickness is about twice the area over the perimeter.
+        area, perimeter = _polygon_area(e.points), e.length
+        if perimeter <= 0 or area <= 0:
+            continue
+        thickness = 2.0 * area / perimeter
+        run = perimeter / 2.0 - thickness
+        if WALL_THICKNESS[0] <= thickness <= WALL_THICKNESS[1] and run >= MIN_WALL_RUN:
+            e.role, e.provenance, e.thickness = Role.WALL, Provenance.INFERRED, thickness
             walls += 1
-        elif e.filled and 0.15 <= sides[0] <= 0.9 and sides[1] / sides[0] < 2.0:
-            e.role, e.provenance = Role.COLUMN, Provenance.INFERRED
-            columns += 1
 
     # Arcs of a door's radius and sweep, drawn natively or as flattened polylines.
     for e in d.entities:
@@ -286,36 +479,50 @@ def _infer_geometry(d: Drawing) -> None:
                 e.center, e.radius = fit[0], fit[1]
                 doors += 1
 
-    # Parallel pairs a wall's width apart, overlapping along most of their length.
+    # Parallel pairs a wall's width apart, overlapping along most of their
+    # length. Lines are bucketed by direction and sorted by offset, so each one
+    # is compared only with neighbours a wall's width away, not with everything.
     long_lines = [e for e in lines if e.length >= 0.5]
-    paired: set[int] = set()
-    for i, p in enumerate(long_lines):
-        if id(p) in paired:
-            continue
-        a, b = p.points
+    by_dir: dict[int, list[tuple[float, Entity]]] = {}
+    for e in long_lines:
+        a, b = e.points
         ang = angle(a, b)
-        for q in long_lines[i + 1:]:
-            if id(q) in paired:
+        rad = math.radians(ang)
+        offset = -a[0] * math.sin(rad) + a[1] * math.cos(rad)
+        by_dir.setdefault(int(ang // 2), []).append((offset, e))
+    paired: set[int] = set()
+    for key, group in by_dir.items():
+        # Neighbouring bins too, so a wall straddling a bin edge is not missed.
+        group = sorted(group + by_dir.get(key + 1, []) if key + 1 in by_dir else group, key=lambda r: r[0])
+        for i, (off_p, p) in enumerate(group):
+            if id(p) in paired:
                 continue
-            c, dd = q.points
-            if angle_diff(ang, angle(c, dd)) > 2.0:
-                continue
-            sep = separation(a, b, c, dd)
-            if not (WALL_THICKNESS[0] <= sep <= WALL_THICKNESS[1]):
-                continue
-            shared = overlap(a, b, c, dd)
-            if shared < 0.6 * min(p.length, q.length):
-                continue
-            for e in (p, q):
-                e.role, e.provenance, e.thickness = Role.WALL, Provenance.INFERRED, sep
-                paired.add(id(e))
-            walls += 2
-            break
+            a, b = p.points
+            for off_q, q in group[i + 1:]:
+                if off_q - off_p > WALL_THICKNESS[1] + 0.01:
+                    break
+                if id(q) in paired or angle_diff(angle(a, b), angle(*q.points)) > 2.0:
+                    continue
+                c, dd = q.points
+                sep = separation(a, b, c, dd)
+                if not (WALL_THICKNESS[0] <= sep <= WALL_THICKNESS[1]):
+                    continue
+                if overlap(a, b, c, dd) < 0.6 * min(p.length, q.length):
+                    continue
+                for e in (p, q):
+                    e.role, e.provenance, e.thickness = Role.WALL, Provenance.INFERRED, sep
+                    paired.add(id(e))
+                walls += 2
+                break
 
-    walls -= _prune_stray_walls(d)
+    _prune_stray_walls(d)
     for label, n in (("walls", walls), ("doors", doors), ("columns", columns)):
         if n:
             d.note(f"inferred {n} {label} from geometry (not confirmed by layer names)")
+
+
+def _polygon_area(pts) -> float:
+    return abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1]))) / 2.0
 
 
 def _is_rectangle(pts, tolerance_deg: float = 2.0) -> bool:
@@ -356,7 +563,17 @@ def _prune_stray_walls(d: Drawing) -> int:
     groups: dict[int, list[int]] = {}
     for i in range(len(walls)):
         groups.setdefault(find(i), []).append(i)
-    main = max(groups.values(), key=lambda g: sum(walls[k].length for k in g))
+    # The building is the group with room labels inside it. A sheet border is
+    # longer than any house; it just has no rooms. Length only breaks ties.
+    labels = [e.points[0] for e in d.texts() if e.role == Role.TEXT and not e.meta.get("unreadable")]
+
+    def enclosed(group) -> int:
+        bx = [boxes[k] for k in group]
+        x0, y0 = min(b[0] for b in bx), min(b[1] for b in bx)
+        x1, y1 = max(b[2] for b in bx), max(b[3] for b in bx)
+        return sum(1 for x, y in labels if x0 <= x <= x1 and y0 <= y <= y1)
+
+    main = max(groups.values(), key=lambda g: (enclosed(g), len(g), sum(walls[k].length for k in g)))
     stray = [k for g in groups.values() if g is not main for k in g]
     for k in stray:
         walls[k].role, walls[k].thickness = Role.OTHER, None
@@ -366,6 +583,14 @@ def _prune_stray_walls(d: Drawing) -> int:
 
 
 SHEET_MARGIN = 2.2   # metres beyond the walls; dimension chains live inside this
+_ROOM_WORDS = ("room", "office", "kitchen", "hall", "wc", "bath", "bed", "living", "dining",
+               "space", "corridor", "lobby", "store", "salle", "chambre", "cuisine", "bureau",
+               "couloir", "entr", "meeting", "lounge", "pantry", "laundry", "garage", "closet")
+
+
+def _looks_like_room_name(text: str) -> bool:
+    lower = text.lower()
+    return any(w in lower for w in _ROOM_WORDS) or bool(re.search(r"\d+(?:[.,]\d+)?\s*m[²2]", lower))
 
 
 def _separate_sheet_furniture(d: Drawing) -> None:
@@ -381,8 +606,22 @@ def _separate_sheet_furniture(d: Drawing) -> None:
     if not walls:
         return
     boxes = [b for b in (e.bounds() for e in walls) if b]
+    # Room names sit inside the building; let them widen it when the wall
+    # search only caught part of it, but only names near the walls, not the
+    # title block's.
     wx0, wy0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
     wx1, wy1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    # Only short labels close to the walls count: a title block's "3 BED 2 BATH
+    # 179.9 m²" mentions rooms too, and must not drag the box down to it.
+    reach = 2 * SHEET_MARGIN
+    for e in d.texts():
+        text = e.text or ""
+        if (e.role != Role.TEXT or e.meta.get("unreadable") or len(text) > 24
+                or len(text.split()) > 3 or not _looks_like_room_name(text)):
+            continue
+        x, y = e.points[0]
+        if wx0 - reach <= x <= wx1 + reach and wy0 - reach <= y <= wy1 + reach:
+            wx0, wy0, wx1, wy1 = min(wx0, x), min(wy0, y), max(wx1, x), max(wy1, y)
     ww, wh = wx1 - wx0, wy1 - wy0
     furniture = dims = 0
     for e in d.entities:
@@ -406,6 +645,20 @@ def _separate_sheet_furniture(d: Drawing) -> None:
                "north arrow, scale bar) were set aside; the re-issued sheet supplies its own")
     if dims:
         d.note(f"inferred {dims} dimension linework entities from their position outside the walls")
+
+
+def _sheet_type(d: Drawing) -> str:
+    """plan | elevation/section | schedule | detail — inferred from the sheet's own words."""
+    words = " ".join((e.text or "") for e in d.texts() if not e.meta.get("unreadable")).lower()
+    if re.search(r"elevation|section|coupe|façade|facade|elevación", words):
+        return "elevation/section"
+    if re.search(r"\d+(?:[.,]\d+)?\s*m[²2]", words) or d.by_role(Role.WALL) and d.by_role(Role.DOOR):
+        return "plan"
+    if re.search(r"schedule|nomenclature|profile|hinge|handle|frame", words):
+        return "schedule"
+    if len(d.texts()) < 15 and len(d.entities) > 5000:
+        return "detail"
+    return "unknown"
 
 
 def _disciplines(d: Drawing) -> list[str]:
