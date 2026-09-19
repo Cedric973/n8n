@@ -65,9 +65,17 @@ def read_pdf(path: str | Path, page: int = 1) -> Drawing:
             if text:
                 vertical = type(obj).__name__.endswith("Vertical")
                 chars = [c for c in obj if isinstance(c, LTChar)]
-                size = chars[0].size if chars else obj.height
+                if vertical:
+                    # pdfminer's char.size is the glyph *advance* once text is
+                    # not upright, so a rotated "1" would come back a quarter
+                    # of its height. The line's width is the font height.
+                    size = obj.width
+                    origin = (obj.x1, obj.y0)  # baseline start of text reading upward
+                else:
+                    size = chars[0].size if chars else obj.height
+                    origin = (obj.x0, obj.y0)
                 drawing.entities.append(Entity(
-                    "text", [(obj.x0, obj.y0)], text=text, height=size,
+                    "text", [origin], text=text, height=size,
                     rotation=90.0 if vertical else 0.0, role=Role.TEXT, source_id=sid()))
             return
         if isinstance(obj, LTTextContainer):

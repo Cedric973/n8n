@@ -86,7 +86,11 @@ def _draw_entity(scene: Scene, e: Entity, f: float) -> None:
         x, y = pts[0]
         anchor = {"start": "start", "middle": "middle", "end": "end"}.get(
             str(e.meta.get("anchor", "start")), "start")
-        scene.text(x, y + size * 0.5, e.text, size=size, anchor=anchor,
+        # The source gives a baseline; the scene centres text on its anchor.
+        # Step half a height off the baseline, perpendicular to it.
+        rad = math.radians(e.rotation)
+        x, y = x - math.sin(rad) * size * 0.5, y + math.cos(rad) * size * 0.5
+        scene.text(x, y, e.text, size=size, anchor=anchor,
                    color=LIGHT if e.role == Role.DIMENSION else ink,
                    rotate=e.rotation, layer=layer)
         return

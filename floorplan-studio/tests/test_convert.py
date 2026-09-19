@@ -59,6 +59,11 @@ class Fixture:
         return cls._cache
 
 
+def text_width_ft(label: str, t) -> float:
+    from floorplan.metrics import text_width
+    return text_width(label, t.size, t.bold)
+
+
 def room_labels(plan) -> set[str]:
     return {r.label.upper() for r in plan.rooms}
 
@@ -142,6 +147,31 @@ class PdfReaderTests(unittest.TestCase):
 
     def test_room_labels_are_read(self):
         self.assertTrue(room_labels(Fixture.paths()["plan"]) <= {e.text for e in self.drawing.texts()})
+
+    def test_rotated_text_keeps_its_height_and_place(self):
+        """pdfminer reports a rotated glyph's advance as its size; we must not."""
+        import math
+        scene = Fixture.paths()["scene"]
+        ppf, off_x, off_y = scene.placement()
+        written = [t for t in scene.texts if t.rotate]
+        self.assertGreater(len(written), 5)
+        for t in written:
+            candidates = [e for e in self.drawing.texts() if e.text == t.value and e.rotation]
+            with self.subTest(text=t.value):
+                self.assertTrue(candidates, "rotated label not read")
+                # Page points -> world feet, then baseline start -> centre:
+                # half the width along the baseline, half the height across it.
+                def centre(e):
+                    x, y = (e.points[0][0] - off_x) / ppf, (e.points[0][1] - off_y) / ppf
+                    rad = math.radians(e.rotation)
+                    half_w = text_width_ft(t.value, t) / 2
+                    return (x + math.cos(rad) * half_w - math.sin(rad) * t.size * 0.5,
+                            y + math.sin(rad) * half_w + math.cos(rad) * t.size * 0.5)
+                e = min(candidates, key=lambda e: math.dist(centre(e), (t.x, t.y)))
+                self.assertAlmostEqual(e.height / ppf, t.size, delta=t.size * 0.05)
+                cx, cy = centre(e)
+                self.assertAlmostEqual(cx, t.x, delta=0.3)
+                self.assertAlmostEqual(cy, t.y, delta=0.3)
 
     def test_out_of_range_page_is_an_error(self):
         from floorplan.convert.readers.pdf import read_pdf
