@@ -1,39 +1,65 @@
 # floorplan-studio
 
 Generate residential floor plans from a footprint outline and a room program.
-You give it a shape and a list of rooms; it returns dimensioned, connected
-plans with doors and windows.
+Draw a shape, say how many bedrooms you want, and get back dimensioned,
+connected plans with doors and windows — as SVG, PDF or CAD-ready DXF.
 
-**Status: work in progress.** The generator works end to end in Python. The
-export backends, the web UI and the test suite are not written yet — see
-[Not done yet](#not-done-yet).
+No third-party dependencies at all. Python 3.10+, standard library only.
 
-No third-party dependencies. Python 3.10+.
+```bash
+python3 -m floorplan.server          # web UI on http://127.0.0.1:8000
+python3 -m floorplan.cli --preview   # or straight to files
+```
 
-## Try it
+## The web UI
+
+`python3 -m floorplan.server` serves a single-page app: pick a preset footprint
+or click out any rectilinear shape on the grid, set the program, and generate.
+Each option renders inline and downloads as PDF, SVG or DXF.
+
+It binds to `127.0.0.1` and has no authentication, because it is a tool you run
+on your own machine. Don't put it on a public interface.
+
+## The CLI
+
+```bash
+python3 -m floorplan.cli \
+    --shape l --width 56 --depth 40 \
+    --bedrooms 4 --bathrooms 3 --garage --mudroom \
+    --title "Cedar Ridge" --variants 3 \
+    --out plans --formats svg,pdf,dxf --preview
+```
+
+`--preview` prints an ASCII plan per variant, which is the fastest way to see
+whether a layout is sensible without opening anything. `--spec request.json`
+takes the same JSON body the HTTP API accepts.
+
+## As a library
 
 ```python
-from floorplan.geometry import Polygon
-from floorplan.spec import PlanSpec
-from floorplan.layout import generate
+from floorplan import Polygon, PlanSpec, generate
+from floorplan.render import build_scene
+from floorplan.svg import render_svg
 
 spec = PlanSpec.from_program(
     Polygon.rectangle(48, 32), bedrooms=3, bathrooms=2, title="Maple St"
 )
-for plan in generate(spec, variants=3):
-    print(plan.summary())
-    for room in plan.rooms:
-        print(f"  {room.label:18s} {room.rect.w:5.1f} x {room.rect.h:5.1f}")
+best = generate(spec, variants=3)[0]
+print(best.summary())
+open("plan.svg", "w").write(render_svg(build_scene(best)))
 ```
 
-Footprints can be a `rectangle`, `l_shape`, `t_shape` or `u_shape`, or any
-rectilinear `Polygon` you pass vertices for.
+Footprints can be `rectangle`, `l_shape`, `t_shape`, `u_shape`, or any
+rectilinear `Polygon` you pass vertices for. Room types, target areas, minimum
+dimensions and adjacency preferences all live in `spec.py` and are meant to be
+edited.
 
 ## How it generates a plan
 
 There is no trained model here, and it does not need one. A floor plan is a
-constraint problem, and solving it directly is both faster and reproducible —
-the same seed always gives the same plan.
+constraint problem, and solving it directly is faster and reproducible: the
+same seed always gives the same plan, which is what makes the download button
+able to rebuild exactly the option you clicked.
 
 For each seed:
 
@@ -51,10 +77,10 @@ For each seed:
    running toward whichever side faces the rest of the house, with rooms
    balanced on either side.
 6. **Open** doors along a spanning tree of the adjacency graph, rooted at the
-   front door, then add windows on exterior walls.
+   front door, then add windows to exterior walls.
 7. **Score** the result, and keep the best plans that are not near-duplicates.
 
-Two details do most of the work for plan quality:
+Three decisions do most of the work for plan quality:
 
 - **Rooms are sliced in a designed sequence, not by size.** A guillotine cut
   keeps neighbours in the sequence adjacent, so listing the kitchen after the
@@ -66,10 +92,31 @@ Two details do most of the work for plan quality:
   little area accuracy for shape validity. When neither side can have what it
   wants, the tighter requirement wins, because a bathroom's width is set by its
   fixtures and a bedroom's is not.
+- **Doors come from a spanning tree**, not from "connect everything that
+  touches", so circulation is deliberate. Bathrooms, closets and the garage are
+  forced to be leaves of that tree — you never walk through a bathroom to reach
+  a bedroom.
 
-Doors come from a spanning tree rather than "connect everything that touches",
-so circulation is deliberate. Bathrooms, closets and the garage are forced to
-be leaves of that tree — you never walk through a bathroom to reach a bedroom.
+Many seeds are tried per request and scored on area error, room proportions,
+starved dimensions, daylight, adjacency preferences, plumbing grouping and
+connectivity. Roughly one seed in eight produces a plan with an unreachable
+room; scoring rejects those, and no plan returned by `generate()` has one.
+
+## Drawing and export
+
+`render.py` builds one `Scene` of primitives in world feet, and each backend
+serialises that same scene — so the SVG, the PDF and the DXF cannot drift apart.
+
+| Output | Notes |
+|---|---|
+| SVG | For the browser and the web UI. |
+| PDF | Hand-written PDF 1.4 writer, Helvetica metrics included for correct text centring. |
+| DXF | AutoCAD R12 ASCII, 1:1 in model space in feet, on named layers, linework only. |
+| JSON | The full plan: rooms, rects, openings, score breakdown. |
+
+Walls are centred on room boundaries, so the footprint outline is the exterior
+wall centreline and a room's rect runs to the middle of its walls. The
+dimensions printed inside each room are the net, inside-face figures.
 
 ## Layout
 
@@ -81,15 +128,41 @@ be leaves of that tree — you never walk through a bathroom to reach a bedroom.
 | `layout.py` | The solver |
 | `openings.py` | Doors and windows |
 | `scoring.py` | Ranking plans against each other |
+| `drawing.py` | Backend-independent scene primitives |
+| `render.py` | Plan to scene: walls, swings, labels, dimensions, title block |
+| `svg.py` `pdf.py` `dxf.py` | Scene to file |
+| `preview.py` | ASCII plan for the terminal |
+| `api.py` | JSON request to spec, shared by the CLI and the server |
+| `cli.py` `server.py` | Entry points |
 
-## Not done yet
+## Tests
 
-- `render.py` / `svg.py` / `pdf.py` / `dxf.py` — drawing the plan. The intent
-  is one scene of primitives in world feet, serialised by each backend, so
-  SVG, PDF and CAD output cannot drift apart.
-- `server.py` and the browser UI for drawing a footprint and picking rooms.
-- `cli.py`.
-- The test suite. The solver has only been exercised by hand so far.
+```bash
+python3 -m unittest discover -s tests -t . -v
+```
+
+92 tests. The layout suite checks the invariants that matter across every
+footprint, program and seed: rooms tile the footprint exactly, never overlap,
+never come out with zero area, and the same seed always gives the same plan.
+The circulation suite checks that every returned plan is fully reachable from
+the front door and that no bathroom or closet is a through-route. The export
+suite validates the PDF cross-reference table and stream lengths, DXF group-code
+pairing, and SVG well-formedness by parsing it.
+
+## Known limitations
+
+- **Rectilinear footprints only.** No curves or diagonals; a diagonal edge is
+  rejected rather than approximated.
+- **Single storey.** No stairs, no vertical circulation.
+- **Guillotine slicing can't always satisfy every minimum.** On a tight
+  program a bedroom can land a few percent under its target width when a single
+  cut cannot serve both sides. The shortfall is shared deliberately, protecting
+  the room with the harder constraint, and it is reported in the plan's score.
+- **No fixtures.** Rooms are labelled boxes; there is no furniture, casework or
+  plumbing layout.
+- **Schematic only.** This is a massing and layout tool. It knows nothing about
+  structure, egress, energy or your local code, and its output is not a
+  construction document.
 
 ## License
 

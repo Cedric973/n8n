@@ -227,17 +227,23 @@ def _merge_small_zones(
     if len(groups) < 2:
         return groups
     order = list(groups)
-    merged: dict[str, list[int]] = {}
+
+    def share(zone: str) -> float:
+        return sum(areas[i] for i in groups[zone]) / total if total > 0 else 0.0
+
+    keep = [z for z in order if share(z) >= MIN_ZONE_SHARE]
+    if not keep:  # every zone is small, so the largest one hosts the rest
+        keep = [max(order, key=share)]
+
+    merged = {zone: list(groups[zone]) for zone in order if zone in keep}
     for position, zone in enumerate(order):
-        members = groups[zone]
-        share = sum(areas[i] for i in members) / total if total > 0 else 0.0
-        if share >= MIN_ZONE_SHARE or not merged and position == len(order) - 1:
-            merged[zone] = list(members)
+        if zone in keep:
             continue
-        host = next(reversed(merged), None) or order[position + 1]
-        merged.setdefault(host, list(groups.get(host, [])) if host not in merged else [])
-        merged[host].extend(members)
-    return merged or {order[0]: [i for m in groups.values() for i in m]}
+        before = [z for z in order[:position] if z in keep]
+        after = [z for z in order[position + 1:] if z in keep]
+        host = before[-1] if before else after[0]
+        merged[host].extend(groups[zone])
+    return merged
 
 
 def _room_item(spec: PlanSpec, areas: list[float], index: int) -> _Item:
