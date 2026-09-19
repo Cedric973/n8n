@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **347 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- **348 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -32,6 +32,11 @@ Vendored individually from their own repos (not part of the claude-skills librar
   Python library. Authored here (the upstream repo ships a library, not a
   `SKILL.md`); the skill wraps its install, async API, extraction strategies,
   deep crawling, and CLI.
+- **browser-skill** — drive the user's real, logged-in Chromium browser (visit
+  pages, fill forms, scrape, click through flows) via the `bsk` CLI + browser
+  extension. From [Tencent/BrowserSkill](https://github.com/Tencent/BrowserSkill).
+  Requires installing the `bsk` CLI and extension separately — see
+  `browser-skill/references/AGENT_INSTALL.md`.
 
 ## Updating
 
