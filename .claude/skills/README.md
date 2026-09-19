@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **346 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- **347 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -27,6 +27,11 @@ Vendored individually from their own repos (not part of the claude-skills librar
 
 - **scroll-world** — builds a scroll-scrubbed "fly through the world" landing
   page via Higgsfield. From [oso95/scroll-world](https://github.com/oso95/scroll-world).
+- **crawl4ai** — crawl/scrape websites into LLM-ready Markdown or structured
+  JSON using the [unclecode/crawl4ai](https://github.com/unclecode/crawl4ai)
+  Python library. Authored here (the upstream repo ships a library, not a
+  `SKILL.md`); the skill wraps its install, async API, extraction strategies,
+  deep crawling, and CLI.
 
 ## Updating
 
