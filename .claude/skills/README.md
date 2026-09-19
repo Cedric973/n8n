@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **348 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- **349 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -37,6 +37,10 @@ Vendored individually from their own repos (not part of the claude-skills librar
   extension. From [Tencent/BrowserSkill](https://github.com/Tencent/BrowserSkill).
   Requires installing the `bsk` CLI and extension separately — see
   `browser-skill/references/AGENT_INSTALL.md`.
+- **framer-motion** — animate React UIs with Motion for React (formerly Framer
+  Motion; npm `motion` / `framer-motion`, v13): transitions, gestures, scroll and
+  layout animations, motion values. Authored here (upstream ships an npm library,
+  not a `SKILL.md`). React-only — for Vue use `motion-v` instead.
 
 ## Updating
 
