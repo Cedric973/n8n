@@ -625,18 +625,30 @@ def _separate_sheet_furniture(d: Drawing) -> None:
     ww, wh = wx1 - wx0, wy1 - wy0
     furniture = dims = 0
     for e in d.entities:
-        if e.role in (Role.WALL, Role.DOOR, Role.WINDOW, Role.COLUMN, Role.STAIR, Role.SHEET):
+        if e.role in (Role.WALL, Role.DOOR, Role.WINDOW, Role.STAIR, Role.SHEET):
             continue
+        if e.provenance == Provenance.VERIFIED and e.role != Role.OTHER and e.kind != "text":
+            continue  # a layer said what this is; position does not overrule it
         b = e.bounds()
         if not b:
             continue
-        outside = (b[0] > wx1 + SHEET_MARGIN or b[2] < wx0 - SHEET_MARGIN
-                   or b[1] > wy1 + SHEET_MARGIN or b[3] < wy0 - SHEET_MARGIN)
+        # Dimensioning lives in a band around the walls; anything that is not
+        # wholly within that band belongs to the sheet, whether it sits clear
+        # of the building or merely starts beside it and runs off to the title
+        # block.
+        within_band = (b[0] >= wx0 - SHEET_MARGIN and b[2] <= wx1 + SHEET_MARGIN
+                       and b[1] >= wy0 - SHEET_MARGIN and b[3] <= wy1 + SHEET_MARGIN)
         frames = (b[2] - b[0]) > ww * 1.15 and (b[3] - b[1]) > wh * 1.15  # a border or page background
         inside = b[0] >= wx0 and b[2] <= wx1 and b[1] >= wy0 and b[3] <= wy1
-        if outside or frames:
+        # A line just outside the walls that runs longer than half the building
+        # is a title-block rule or a border, not a dimension.
+        long_rule = (e.kind == "line" and not inside
+                     and max(b[2] - b[0], b[3] - b[1]) > 0.5 * max(ww, wh))
+        if not within_band or frames or long_rule:
             e.role, e.provenance = Role.SHEET, Provenance.INFERRED
             furniture += 1
+        elif e.role == Role.COLUMN and not inside:
+            e.role = Role.OTHER   # a column stands in the building or it is a symbol
         elif e.role == Role.OTHER and e.kind != "text" and not inside:
             e.role, e.provenance = Role.DIMENSION, Provenance.INFERRED
             dims += 1

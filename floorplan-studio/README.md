@@ -93,24 +93,46 @@ In order, the analyzer:
    the drawing's extent — 15 000 across is millimetres, 15 is metres — and
    flagged as such. A PDF or SVG is in paper units until a scale is known.
 2. **Resolves scale.** A printed scale on the sheet is believed. Failing that,
-   every dimension string is measured against the two tick marks it sits
-   between; the median of readings that agree is a *calculated* scale. Failing
-   both, the scale is unknown, the geometry is left in paper metres, and the
-   sheet says so.
+   every dimension string — "3.60 m", `12'-6"`, or a bare "3600" read as
+   millimetres, as CAD writes it — is measured against the two tick marks it
+   sits between; the median of at least three readings agreeing within 8% is a
+   *calculated* scale, and scattered readings are refused rather than averaged
+   into a confident wrong answer. Failing that, room-area labels ("51.88 m²")
+   are flood-filled to their walls and set against the printed area; when most
+   rooms agree, that is an *inferred* scale. Failing all three, the scale is
+   unknown, the geometry stays in paper metres, and the sheet says so. A sheet
+   stamped N.T.S. caps whatever was measured at *inferred*.
 3. **Classifies by layer.** Layer names in several languages are believed
    (`WALL`, `MUR`, `WAND`; `DOOR`, `PORTE`; `FEN`, `WIND`; `DIM`, `COTE`…).
    Discipline follows from them too: `E-` or `LIGHT` means electrical is
    present, `P-` or `PIPE` plumbing, and so on.
-4. **Infers from geometry** what no layer explained: filled thin rectangles
-   and parallel line pairs a wall's width apart become walls; arcs of a
-   door's radius and sweep become doors; anything far outside the walls is the
-   source's own sheet furniture and is set aside, since the re-issued sheet
-   supplies its own.
-5. **Cleans**: drops zero-length and duplicate entities, merges collinear
+4. **Infers from geometry** what no layer explained: thin filled outlines and
+   parallel line pairs a wall's width apart become walls; arcs of a door's
+   radius and sweep become doors; the largest body of walls *with room names
+   inside it* is the building, so a sheet border — longer than any house — is
+   not; anything far outside it, and any rule longer than half the building
+   just outside it, is the source's own sheet furniture and is set aside, since
+   the re-issued sheet supplies its own.
+5. **Reconstructs walls the export flattened.** CAD plot drivers turn a SOLID
+   or ANSI31 hatch into hundreds of hairline strokes 0.1 mm apart; no stroke is
+   a wall and no pair is a wall face, so the rules above see nothing. Strokes
+   are sampled on a 5 cm grid, cells crossed by two or more are solid, and a
+   connected solid region with a wall's thickness is a wall — handed back as
+   merged rectangles so it exports to CAD as linework. On a real ten-page set
+   this turned 4,365 strokes into 27 wall regions and the recognised building
+   from a 7 × 11 m fragment into the full 38 × 16 m.
+6. **Cleans**: drops zero-length and duplicate entities, merges collinear
    segments, snaps lines within 1.5° of an axis. Each step is counted in the
-   report. Text is never touched.
-6. **Grades the source** from EXCELLENT to POOR. UNUSABLE is reserved for a
-   source with no vector geometry at all, and nothing is exported for it.
+   report. Text is never touched — except text from a font with no Unicode
+   map, which arrives as `(cid:1234)` and is counted as unknown, kept in place
+   in the report, and never drawn.
+7. **Types and grades the sheet**: plan, elevation/section, schedule or
+   detail from its own words; EXCELLENT to POOR from what it could establish.
+   UNUSABLE is reserved for a source with no vector geometry at all, and
+   nothing is exported for it.
+
+`--pages all` (or `--pages 1,3,4`) converts a set, one report per page plus
+a summary of page types and grades.
 
 Inferred geometry is drawn **dashed** (walls in a distinct tint) so a reader
 can tell recognised geometry from confirmed geometry on the sheet itself, and
