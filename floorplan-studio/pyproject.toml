@@ -20,6 +20,10 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+# Reading existing drawings. The generator itself needs nothing.
+convert = ["ezdxf>=1.1", "pdfminer.six>=20221105"]
+
 [project.scripts]
 floorplan = "floorplan.cli:main"
 floorplan-server = "floorplan.server:main"

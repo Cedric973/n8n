@@ -32,7 +32,7 @@ class Path:
     stroke: str | None = None
     width: float = HAIRLINE
     dash: tuple[float, ...] | None = None
-    layer: str = "PLAN"
+    layer: str = "0"
 
 
 @dataclass
@@ -45,7 +45,7 @@ class Text:
     bold: bool = False
     color: str = "#1a1a1a"
     rotate: float = 0.0  # degrees, counter-clockwise
-    layer: str = "TEXT"
+    layer: str = "A-TEXT"
 
 
 @dataclass

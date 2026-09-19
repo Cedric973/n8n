@@ -4,18 +4,19 @@ Written at 1:1 into model space in feet, on named layers, so the plan can be
 opened in CAD and dimensioned or detailed further. R12 is deliberate: it is the
 most widely readable DXF revision and needs no handles or object dictionary.
 
-Paths become LINE entities and text becomes TEXT. Fills are not exported —
-a CAD user wants linework, and hatch patterns would only be in the way.
+Paths become LINE entities and text becomes TEXT. Filled shapes are exported
+as their outlines — a wall drawn as a solid band on paper is a pair of lines
+in CAD — while tint-only fills (room floors, opening erasures) are dropped.
 """
 
 from __future__ import annotations
 
 from .drawing import Path, Scene, Text
 
-#: Layer name -> AutoCAD colour index.
+#: AIA layer name -> AutoCAD colour index.
 LAYER_COLORS = {
-    "FLOOR": 8, "WALLS": 7, "OPENINGS": 8, "DOORS": 3,
-    "WINDOWS": 4, "TEXT": 2, "DIMS": 1, "SHEET": 8, "PLAN": 7,
+    "A-AREA": 8, "A-WALL": 7, "A-OPEN": 8, "A-DOOR": 3,
+    "A-WIND": 4, "A-TEXT": 2, "A-DIMS": 1, "G-ANNO": 8, "0": 7,
 }
 DEFAULT_COLOR = 7
 
@@ -23,11 +24,11 @@ DEFAULT_COLOR = 7
 DXF_ENCODING = "cp1252"
 
 #: Layers that carry only fills and would be noise as outlines in CAD.
-SKIP_LAYERS = {"FLOOR", "OPENINGS"}
+SKIP_LAYERS = {"A-AREA", "A-OPEN"}
 
 
 def render_dxf(scene: Scene) -> str:
-    layers = [l for l in scene.layers() if l not in SKIP_LAYERS] or ["PLAN"]
+    layers = [l for l in scene.layers() if l not in SKIP_LAYERS] or ["0"]
     out: list[str] = []
     _section(out, "HEADER", _header())
     _section(out, "TABLES", _layer_table(layers))
@@ -84,8 +85,9 @@ def _entities(scene: Scene) -> list[str]:
 
 
 def _path(out: list[str], path: Path) -> None:
-    if path.stroke is None and path.fill is not None:
-        return  # a pure fill has no linework to export
+    # A filled shape with no stroke is still linework in CAD: a wall band is
+    # exported as its outline. Fills that are only tint (room floors, opening
+    # erasures) live on layers that are skipped before we get here.
     points = list(path.points)
     if path.closed and len(points) > 2:
         points.append(points[0])

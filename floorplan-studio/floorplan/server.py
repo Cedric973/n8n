@@ -8,8 +8,12 @@ only expose it further if you understand what that means.
 from __future__ import annotations
 
 import argparse
+import email
+import email.policy
 import json
 import mimetypes
+import secrets
+import tempfile
 import traceback
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +28,9 @@ from .svg import render_svg
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 256 * 1024
+MAX_UPLOAD = 25 * 1024 * 1024
+UPLOAD_TYPES = {"dxf", "svg", "pdf"}
+KEEP_CONVERSIONS = 50
 
 EXPORTERS = {
     "svg": ("image/svg+xml", lambda scene: render_svg(scene).encode("utf-8")),
@@ -81,6 +88,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("index.html")
             elif route == "/api/catalog":
                 self._json(200, {"rooms": catalog()})
+            elif route.startswith("/api/converted/"):
+                self._download(route[len("/api/converted/"):])
             elif route.startswith("/static/"):
                 self._static(route[len("/static/"):])
             else:
@@ -97,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._generate()
             elif route == "/api/export":
                 self._export()
+            elif route == "/api/convert":
+                self._convert()
             else:
                 self._json(404, {"error": "not found"})
         except RequestError as exc:
@@ -147,6 +158,89 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, content_type, {
             "Content-Disposition": f'attachment; filename="{stem}-seed{plan.seed}.{fmt}"'
         })
+
+
+    # -- conversion --------------------------------------------------------
+
+    def _store(self) -> dict:
+        store = getattr(self.server, "converted", None)
+        if store is None:
+            store = {}
+            self.server.converted = store  # type: ignore[attr-defined]
+        return store
+
+    def _read_multipart(self) -> tuple[str, bytes, dict[str, str]]:
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ctype:
+            raise RequestError("upload must be multipart/form-data")
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise RequestError("empty upload")
+        if length > MAX_UPLOAD:
+            raise RequestError(f"upload too large (limit {MAX_UPLOAD // (1024 * 1024)} MB)")
+        body = self.rfile.read(length)
+        message = email.message_from_bytes(
+            b"Content-Type: " + ctype.encode("latin-1") + b"\r\nMIME-Version: 1.0\r\n\r\n" + body,
+            policy=email.policy.HTTP,
+        )
+        if not message.is_multipart():
+            raise RequestError("malformed multipart body")
+        filename, payload, fields = "", b"", {}
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition") or ""
+            data = part.get_payload(decode=True) or b""
+            if part.get_filename():
+                filename, payload = Path(part.get_filename()).name, data
+            else:
+                fields[str(name)] = data.decode("utf-8", "replace")
+        if not filename:
+            raise RequestError("no file in upload")
+        return filename, payload, fields
+
+    def _convert(self) -> None:
+        from .convert.pipeline import UnsupportedSource, convert_file
+
+        filename, payload, fields = self._read_multipart()
+        suffix = Path(filename).suffix.lower().lstrip(".")
+        if suffix not in UPLOAD_TYPES:
+            raise RequestError(f"only {', '.join(sorted(UPLOAD_TYPES))} files can be converted")
+        formats = [f for f in (fields.get("formats") or "pdf,dxf,svg,png").split(",") if f]
+        token = secrets.token_urlsafe(16)
+        workdir = Path(tempfile.mkdtemp(prefix="floorplan-"))
+        source = workdir / ("".join(c if c.isalnum() or c in "-_." else "-" for c in filename) or f"plan.{suffix}")
+        source.write_bytes(payload)
+        try:
+            report = convert_file(source, formats=formats, out_dir=workdir / "out",
+                                  page=int(fields.get("page") or 1),
+                                  units=fields.get("units") or "metric",
+                                  sheet=fields.get("sheet") or None, scale=fields.get("scale") or None)
+        except (UnsupportedSource, ValueError, ImportError) as exc:
+            raise RequestError(str(exc)) from exc
+        store = self._store()
+        store[token] = workdir / "out"
+        while len(store) > KEEP_CONVERSIONS:
+            store.pop(next(iter(store)))
+        svg = ""
+        if "svg" in report["outputs"]:
+            svg = Path(report["outputs"]["svg"]).read_text(encoding="utf-8")
+        downloads = {fmt: f"/api/converted/{token}/{Path(p).name}" for fmt, p in report["outputs"].items()}
+        self._json(200, {"report": report, "svg": svg, "downloads": downloads})
+
+    def _download(self, rest: str) -> None:
+        token, _, name = rest.partition("/")
+        folder = self._store().get(token)
+        if folder is None or not name or "/" in name or "\\" in name:
+            self._json(404, {"error": "not found"})
+            return
+        target = (folder / name).resolve()
+        if folder.resolve() not in target.parents or not target.is_file():
+            self._json(404, {"error": "not found"})
+            return
+        kind = {"pdf": "application/pdf", "dxf": "image/vnd.dxf", "svg": "image/svg+xml",
+                "png": "image/png", "md": "text/markdown; charset=utf-8",
+                "json": "application/json"}.get(target.suffix.lstrip("."), "application/octet-stream")
+        self._send(200, target.read_bytes(), kind,
+                   {"Content-Disposition": f'attachment; filename="{target.name}"'})
 
 
 def serve(host: str = "127.0.0.1", port: int = 8000, quiet: bool = False) -> None:

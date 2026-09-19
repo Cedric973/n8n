@@ -6,7 +6,14 @@ connected plans with doors and windows — as SVG, PDF or CAD-ready DXF.
 
 Metric by default: metres, m², and 1:50.
 
-No third-party dependencies at all. Python 3.10+, standard library only.
+It also works the other way round: give it an existing DXF, SVG or vector PDF
+plan and it will read it, work out its units and scale, recognise walls and
+doors, and re-issue it cleanly on a standard sheet — with a report that says
+what it read, what it worked out, what it guessed and what it could not tell.
+
+No third-party dependencies for generating plans. Python 3.10+, standard
+library only. Converting *existing* plans is an optional extra that brings in
+`ezdxf` and `pdfminer.six`.
 
 ```bash
 python3 -m floorplan.server          # web UI on http://127.0.0.1:8000
@@ -48,6 +55,78 @@ has the same switch.
 `--sheet` and `--scale` override the automatic choice (`--sheet "ANSI C"`,
 `--scale 1:100`). Asking for a scale that will not fit on any sheet is an error
 naming one that will, rather than a drawing that runs off the paper.
+
+## Converting an existing plan
+
+```bash
+pip install "floorplan-studio[convert]"        # ezdxf + pdfminer.six
+python3 -m floorplan.cli convert plan.pdf --to pdf,dxf,svg,png --out converted
+```
+
+The web UI has the same thing as an upload panel. Either way you get the
+re-issued plan in each requested format plus `plan-report.md` and
+`plan-report.json`.
+
+| Source | Reads | Notes |
+|---|---|---|
+| DXF | every revision, blocks, curves | units from `$INSUNITS` when declared |
+| SVG | shapes, paths, transforms, text | page size from `width`/`viewBox` |
+| PDF | vector paths and positioned text | one page at a time; scans are refused, not guessed at |
+| DWG, DWF, RVT, IFC | — | refused with the export step that would work (DXF) |
+| PNG, JPG, TIFF, scans, photos | — | refused; raster reconstruction is not implemented |
+
+### What the analyzer does, and how far to trust it
+
+Everything the converter knows carries a provenance, on every entity and on
+the drawing's units and scale, and nothing is promoted silently:
+
+| | Meaning | Example |
+|---|---|---|
+| **VERIFIED** | read directly from the source | a line on a layer called `A-WALL`; a printed `1:100` |
+| **CALCULATED** | derived mathematically from reliable source data | a scale measured from dimension strings against their tick marks |
+| **INFERRED** | a likely interpretation, not confirmed | two parallel lines 0.2 m apart called a wall; a quarter-circle of 0.9 m called a door |
+| **UNKNOWN** | could not be determined | a PDF with no printed scale and no readable dimensions |
+
+In order, the analyzer:
+
+1. **Resolves units.** A DXF may declare them. Otherwise they are inferred from
+   the drawing's extent — 15 000 across is millimetres, 15 is metres — and
+   flagged as such. A PDF or SVG is in paper units until a scale is known.
+2. **Resolves scale.** A printed scale on the sheet is believed. Failing that,
+   every dimension string is measured against the two tick marks it sits
+   between; the median of readings that agree is a *calculated* scale. Failing
+   both, the scale is unknown, the geometry is left in paper metres, and the
+   sheet says so.
+3. **Classifies by layer.** Layer names in several languages are believed
+   (`WALL`, `MUR`, `WAND`; `DOOR`, `PORTE`; `FEN`, `WIND`; `DIM`, `COTE`…).
+   Discipline follows from them too: `E-` or `LIGHT` means electrical is
+   present, `P-` or `PIPE` plumbing, and so on.
+4. **Infers from geometry** what no layer explained: filled thin rectangles
+   and parallel line pairs a wall's width apart become walls; arcs of a
+   door's radius and sweep become doors; anything far outside the walls is the
+   source's own sheet furniture and is set aside, since the re-issued sheet
+   supplies its own.
+5. **Cleans**: drops zero-length and duplicate entities, merges collinear
+   segments, snaps lines within 1.5° of an axis. Each step is counted in the
+   report. Text is never touched.
+6. **Grades the source** from EXCELLENT to POOR. UNUSABLE is reserved for a
+   source with no vector geometry at all, and nothing is exported for it.
+
+Inferred geometry is drawn **dashed** (walls in a distinct tint) so a reader
+can tell recognised geometry from confirmed geometry on the sheet itself, and
+the title block carries the provenance counts.
+
+Two things this is not. It is not a DWG converter: DWG is a proprietary
+binary and reading it needs Autodesk's or ODA's own tooling, so the converter
+tells you to export DXF rather than produce a fake `.dwg`. And it is not a
+scan vectoriser: a photographed or scanned plan is refused, because a
+reconstruction from pixels would have to be presented as verified geometry to
+be useful and it would not be.
+
+The round trip is exact enough to test against: a generated plan exported as
+PDF, read back with its printed scale deleted, comes back at 1:50 from
+seventeen dimension readings that agree to within 0.1%, with every door found
+from its swing alone.
 
 ## As a library
 
@@ -221,6 +300,12 @@ dimensions printed inside each room are the net, inside-face figures.
 | `font.py` | Single-stroke vector font, used only by the rasteriser |
 | `preview.py` | ASCII plan for the terminal |
 | `api.py` | JSON request to spec, shared by the CLI and the server |
+| `convert/model.py` | Entities with roles and provenance |
+| `convert/readers/` | DXF (ezdxf), SVG (stdlib), PDF (pdfminer.six) |
+| `convert/analyze.py` | Units, scale, classification, sheet furniture, quality grade |
+| `convert/clean.py` | Dedupe, merge, snap |
+| `convert/render.py` | Drawing to scene, inferred geometry dashed |
+| `convert/report.py` `convert/pipeline.py` | The report and the one-call pipeline |
 | `cli.py` `server.py` | Entry points |
 
 ## Tests
@@ -241,6 +326,13 @@ The sheet suite checks the property the whole thing exists for: two differently
 sized plans come out at the same points per foot, a small plan takes up less of
 its sheet rather than being blown up, and a known 64 ft length measures exactly
 16 inches on the page.
+
+The converter suite ships no sample files: every fixture is a generated plan
+exported by the package's own writers, read back, and required to yield what
+the generator knew — wall extents to 5 cm, every door, every room label, the
+declared units, and the printed scale. One test deletes the printed scale and
+requires the calibration to recover it; another deletes the dimensions too and
+requires the scale to be reported unknown rather than guessed.
 
 The units suite checks that conversion happens at the boundary and nowhere else:
 metric output carries no feet marks, imperial output carries no `m²`, and the

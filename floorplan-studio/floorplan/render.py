@@ -80,7 +80,7 @@ def _band(seg: Segment, thickness: float, extend: bool = True) -> Rect:
 def _draw_floors(scene: Scene, plan: Plan) -> None:
     for room in plan.rooms:
         if room.rect.area > 0:
-            scene.rect(room.rect, fill=room.room_type.fill, layer="FLOOR")
+            scene.rect(room.rect, fill=room.room_type.fill, layer="A-AREA")
 
 
 def _draw_walls(scene: Scene, plan: Plan) -> None:
@@ -92,9 +92,9 @@ def _draw_walls(scene: Scene, plan: Plan) -> None:
         for edge in room.rect.edges().values():
             if (edge.x1, edge.y1, edge.x2, edge.y2) in on_boundary:
                 continue  # the exterior shell is drawn once, below
-            scene.rect(_band(edge, spec.interior_wall), fill=WALL, layer="WALLS")
+            scene.rect(_band(edge, spec.interior_wall), fill=WALL, layer="A-WALL")
     for edge in plan.footprint.edges():
-        scene.rect(_band(edge, spec.exterior_wall), fill=WALL, layer="WALLS")
+        scene.rect(_band(edge, spec.exterior_wall), fill=WALL, layer="A-WALL")
 
 
 def _opening_thickness(plan: Plan, kind: str) -> float:
@@ -107,7 +107,7 @@ def _punch_openings(scene: Scene, plan: Plan) -> None:
     for opening in plan.openings:
         thickness = _opening_thickness(plan, opening.kind) + 0.02
         scene.rect(
-            _band(opening.segment, thickness, extend=False), fill=PAPER, layer="OPENINGS"
+            _band(opening.segment, thickness, extend=False), fill=PAPER, layer="A-OPEN"
         )
 
 
@@ -150,7 +150,7 @@ def _draw_door(scene: Scene, plan: Plan, opening) -> None:
     hinge = (seg.x1, seg.y1) if opening.hinge == "left" else (seg.x2, seg.y2)
     latch = (seg.x2, seg.y2) if opening.hinge == "left" else (seg.x1, seg.y1)
     tip = (hinge[0] + nx * width, hinge[1] + ny * width)
-    scene.line(*hinge, *tip, stroke=INK, width=HAIRLINE * 1.6, layer="DOORS")
+    scene.line(*hinge, *tip, stroke=INK, width=HAIRLINE * 1.6, layer="A-DOOR")
     start = math.atan2(tip[1] - hinge[1], tip[0] - hinge[0])
     end = math.atan2(latch[1] - hinge[1], latch[0] - hinge[0])
     if end - start > math.pi:
@@ -159,7 +159,7 @@ def _draw_door(scene: Scene, plan: Plan, opening) -> None:
         end += 2 * math.pi
     scene.arc(
         hinge[0], hinge[1], width, start, end,
-        stroke=LIGHT, width=HAIRLINE, layer="DOORS",
+        stroke=LIGHT, width=HAIRLINE, layer="A-DOOR",
     )
 
 
@@ -171,12 +171,12 @@ def _draw_cased(scene: Scene, plan: Plan, opening) -> None:
         if seg.vertical:
             scene.line(
                 point[0] - thickness / 2, point[1], point[0] + thickness / 2, point[1],
-                stroke=WALL, width=HAIRLINE * 1.4, layer="DOORS",
+                stroke=WALL, width=HAIRLINE * 1.4, layer="A-DOOR",
             )
         else:
             scene.line(
                 point[0], point[1] - thickness / 2, point[0], point[1] + thickness / 2,
-                stroke=WALL, width=HAIRLINE * 1.4, layer="DOORS",
+                stroke=WALL, width=HAIRLINE * 1.4, layer="A-DOOR",
             )
 
 
@@ -189,12 +189,12 @@ def _draw_window(scene: Scene, plan: Plan, opening) -> None:
         if seg.vertical:
             scene.line(
                 seg.x1 + offset, seg.y1, seg.x1 + offset, seg.y2,
-                stroke=WALL if i != 1 else LIGHT, width=width, layer="WINDOWS",
+                stroke=WALL if i != 1 else LIGHT, width=width, layer="A-WIND",
             )
         else:
             scene.line(
                 seg.x1, seg.y1 + offset, seg.x2, seg.y1 + offset,
-                stroke=WALL if i != 1 else LIGHT, width=width, layer="WINDOWS",
+                stroke=WALL if i != 1 else LIGHT, width=width, layer="A-WIND",
             )
 
 
@@ -204,19 +204,19 @@ def _draw_garage(scene: Scene, plan: Plan, opening) -> None:
     for offset in (-thickness / 2, thickness / 2):
         if seg.vertical:
             scene.line(seg.x1 + offset, seg.y1, seg.x1 + offset, seg.y2,
-                       stroke=WALL, width=HAIRLINE * 1.4, layer="DOORS")
+                       stroke=WALL, width=HAIRLINE * 1.4, layer="A-DOOR")
         else:
             scene.line(seg.x1, seg.y1 + offset, seg.x2, seg.y1 + offset,
-                       stroke=WALL, width=HAIRLINE * 1.4, layer="DOORS")
+                       stroke=WALL, width=HAIRLINE * 1.4, layer="A-DOOR")
     for i in range(1, 4):  # panel divisions
         t = i / 4.0
         px, py = seg.point_at(t)
         if seg.vertical:
             scene.line(px - thickness / 2, py, px + thickness / 2, py,
-                       stroke=LIGHT, width=HAIRLINE, layer="DOORS")
+                       stroke=LIGHT, width=HAIRLINE, layer="A-DOOR")
         else:
             scene.line(px, py - thickness / 2, px, py + thickness / 2,
-                       stroke=LIGHT, width=HAIRLINE, layer="DOORS")
+                       stroke=LIGHT, width=HAIRLINE, layer="A-DOOR")
 
 
 # --------------------------------------------------------------------------
@@ -267,14 +267,14 @@ def _draw_labels(scene: Scene, plan: Plan) -> None:
         detail_size = min(size * 0.7, _fit(dims, along, size * 0.7), _fit(area, along, size * 0.7))
         if across >= 4.2 * size and detail_size >= MIN_LABEL:
             scene.text(*_stack(cx, cy, size * 0.80, rotate), name, size=size, bold=True,
-                       color=INK, rotate=rotate, layer="TEXT")
+                       color=INK, rotate=rotate, layer="A-TEXT")
             scene.text(*_stack(cx, cy, -size * 0.30, rotate), dims, size=detail_size,
-                       color=LIGHT, rotate=rotate, layer="TEXT")
+                       color=LIGHT, rotate=rotate, layer="A-TEXT")
             scene.text(*_stack(cx, cy, -size * 1.30, rotate), area, size=detail_size,
-                       color=LIGHT, rotate=rotate, layer="TEXT")
+                       color=LIGHT, rotate=rotate, layer="A-TEXT")
         else:
             scene.text(cx, cy, name, size=size, bold=True, color=INK,
-                       rotate=rotate, layer="TEXT")
+                       rotate=rotate, layer="A-TEXT")
 
 
 # --------------------------------------------------------------------------
@@ -283,9 +283,9 @@ def _draw_labels(scene: Scene, plan: Plan) -> None:
 
 def _tick(scene: Scene, x: float, y: float, vertical: bool, size: float = 0.28) -> None:
     if vertical:
-        scene.line(x - size, y - size, x + size, y + size, stroke=INK, width=HAIRLINE, layer="DIMS")
+        scene.line(x - size, y - size, x + size, y + size, stroke=INK, width=HAIRLINE, layer="A-DIMS")
     else:
-        scene.line(x - size, y - size, x + size, y + size, stroke=INK, width=HAIRLINE, layer="DIMS")
+        scene.line(x - size, y - size, x + size, y + size, stroke=INK, width=HAIRLINE, layer="A-DIMS")
 
 
 def _chain(scene: Scene, values: list[float], at: float, horizontal: bool,
@@ -294,9 +294,9 @@ def _chain(scene: Scene, values: list[float], at: float, horizontal: bool,
     if len(values) < 2:
         return
     if horizontal:
-        scene.line(values[0], at, values[-1], at, stroke=INK, width=HAIRLINE, layer="DIMS")
+        scene.line(values[0], at, values[-1], at, stroke=INK, width=HAIRLINE, layer="A-DIMS")
     else:
-        scene.line(at, values[0], at, values[-1], stroke=INK, width=HAIRLINE, layer="DIMS")
+        scene.line(at, values[0], at, values[-1], stroke=INK, width=HAIRLINE, layer="A-DIMS")
     for value in values:
         if horizontal:
             _tick(scene, value, at, False)
@@ -308,10 +308,10 @@ def _chain(scene: Scene, values: list[float], at: float, horizontal: bool,
         mid = (lo + hi) / 2.0
         if horizontal:
             scene.text(mid, at + text_offset, format_length(hi - lo, units), size=0.52,
-                       color=INK, layer="DIMS")
+                       color=INK, layer="A-DIMS")
         else:
             scene.text(at + text_offset, mid, format_length(hi - lo, units), size=0.52,
-                       color=INK, rotate=90.0, layer="DIMS")
+                       color=INK, rotate=90.0, layer="A-DIMS")
 
 
 #: The four faces a plan is dimensioned from, as (chain runs along x, far side).
@@ -385,27 +385,27 @@ def _draw_north(scene: Scene, bounds: Rect) -> None:
     cx, cy = bounds.x2 + 10.5, bounds.y2 - 2.5
     scene.polyline(
         [(cx, cy + 1.9), (cx + 0.85, cy - 1.5), (cx, cy - 0.75), (cx - 0.85, cy - 1.5)],
-        closed=True, fill=INK, layer="SHEET",
+        closed=True, fill=INK, layer="G-ANNO",
     )
-    scene.text(cx, cy + 2.4, "N", size=0.72, bold=True, color=INK, layer="SHEET")
+    scene.text(cx, cy + 2.4, "N", size=0.72, bold=True, color=INK, layer="G-ANNO")
 
 
 def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
     """Three ruled cells: identity, scale, issue. Nothing shares a cell."""
     top = bounds.y - 8.0
     box = Rect(bounds.x, top - TITLE_HEIGHT, bounds.w, TITLE_HEIGHT)
-    scene.rect(box, stroke=INK, width=HAIRLINE * 1.5, layer="SHEET")
+    scene.rect(box, stroke=INK, width=HAIRLINE * 1.5, layer="G-ANNO")
 
     identity = box.x + box.w * 0.54
     issue = box.x + box.w * 0.76
     for x in (identity, issue):
-        scene.line(x, box.y, x, box.y2, stroke=INK, width=HAIRLINE, layer="SHEET")
+        scene.line(x, box.y, x, box.y2, stroke=INK, width=HAIRLINE, layer="G-ANNO")
 
     summary = plan.summary()
     pad = 0.7
     title_size = _fit(plan.spec.title, identity - box.x - 2 * pad, 1.0, bold=True)
     scene.text(box.x + pad, box.y2 - 1.55, plan.spec.title, size=max(title_size, 0.45),
-               bold=True, anchor="start", color=INK, layer="SHEET")
+               bold=True, anchor="start", color=INK, layer="G-ANNO")
 
     facts = (
         f"{summary['bedrooms']} BED   {summary['bathrooms']} BATH   "
@@ -414,21 +414,21 @@ def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
     )
     facts_size = _fit(facts, identity - box.x - 2 * pad, 0.6)
     scene.text(box.x + pad, box.y + 1.15, facts, size=max(facts_size, 0.3),
-               anchor="start", color=INK, layer="SHEET")
+               anchor="start", color=INK, layer="G-ANNO")
 
     scene.text(box.x2 - pad, box.y2 - 1.5, date.today().isoformat(),
                size=_fit(date.today().isoformat(), box.x2 - issue - 2 * pad, 0.6),
-               anchor="end", color=LIGHT, layer="SHEET")
+               anchor="end", color=LIGHT, layer="G-ANNO")
     seed = f"SCHEMATIC · SEED {plan.seed}"
     scene.text(box.x2 - pad, box.y + 1.15, seed,
                size=_fit(seed, box.x2 - issue - 2 * pad, 0.6),
-               anchor="end", color=LIGHT, layer="SHEET")
+               anchor="end", color=LIGHT, layer="G-ANNO")
     cell = Rect(identity, box.y, issue - identity, box.h)
     _draw_scale_bar(scene, cell, plan.spec.units)
     if scene.scale is not None:
         label = f"SCALE  {scene.scale.label}"
         scene.text(cell.center[0], cell.y2 - 0.85, label,
-                   size=_fit(label, cell.w * 0.92, 0.52), color=INK, layer="SHEET")
+                   size=_fit(label, cell.w * 0.92, 0.52), color=INK, layer="G-ANNO")
 
 
 def _draw_scale_bar(scene: Scene, cell: Rect, units: str = "metric") -> None:
@@ -443,11 +443,11 @@ def _draw_scale_bar(scene: Scene, cell: Rect, units: str = "metric") -> None:
         scene.rect(
             Rect(x0 + i * step, y0, step, cell.h * 0.13),
             fill=INK if i % 2 == 0 else PAPER,
-            stroke=INK, width=HAIRLINE * 0.8, layer="SHEET",
+            stroke=INK, width=HAIRLINE * 0.8, layer="G-ANNO",
         )
     # Labelled at each end rather than as one padded string, so the text can
     # never grow wider than the bar it belongs to.
     size = min(0.5, _fit("00 FT", cell.w * 0.4, 0.5))
-    scene.text(x0, y0 - 0.8, "0", size=size, anchor="start", color=LIGHT, layer="SHEET")
+    scene.text(x0, y0 - 0.8, "0", size=size, anchor="start", color=LIGHT, layer="G-ANNO")
     scene.text(x0 + length, y0 - 0.8, label, size=size, anchor="end",
-               color=LIGHT, layer="SHEET")
+               color=LIGHT, layer="G-ANNO")

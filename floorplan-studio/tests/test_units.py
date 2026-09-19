@@ -148,7 +148,7 @@ class OutputTests(unittest.TestCase):
             spec = PlanSpec.from_program(Polygon.rectangle(48, 32), bedrooms=3,
                                          bathrooms=2, units=units)
             plan = generate(spec, variants=1)[0]
-            chains = [t.value for t in build_scene(plan).texts if t.layer == "DIMS"]
+            chains = [t.value for t in build_scene(plan).texts if t.layer == "A-DIMS"]
             with self.subTest(units=units):
                 self.assertTrue(chains)
                 self.assertTrue(all(needle in c for c in chains), chains[:3])

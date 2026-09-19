@@ -22,7 +22,8 @@ FORMATS = ("svg", "pdf", "png", "dxf", "json")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="floorplan",
-        description="Generate residential floor plans from a footprint and a room program.",
+        description="Generate residential floor plans from a footprint and a room program. "
+                    "Use `floorplan convert <file>` to re-issue an existing DXF, SVG or PDF plan.",
     )
     shape = parser.add_argument_group("footprint")
     shape.add_argument("--shape", default="rectangle", choices=("rectangle", "l", "t", "u"))
@@ -79,7 +80,57 @@ def payload_from(args: argparse.Namespace) -> dict:
     }
 
 
+def build_convert_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="floorplan convert",
+        description="Read an existing DXF, SVG or vector PDF plan and re-issue it cleanly.",
+    )
+    parser.add_argument("source", type=Path)
+    parser.add_argument("--to", default="pdf,dxf", help="comma separated: pdf,dxf,svg,png")
+    parser.add_argument("--out", type=Path, default=Path("converted"))
+    parser.add_argument("--page", type=int, default=1, help="PDF page to read")
+    parser.add_argument("--units", default=DEFAULT_UNITS, choices=("imperial", "metric"),
+                        help="presentation units for the re-issued sheet")
+    parser.add_argument("--sheet", help="force a sheet size, e.g. 'A3' or 'ANSI C'")
+    parser.add_argument("--scale", help="force a drawing scale, e.g. '1:100'")
+    parser.add_argument("--dpi", type=float, default=150.0)
+    parser.add_argument("--quiet", action="store_true")
+    return parser
+
+
+def convert_main(argv: list[str]) -> int:
+    from .convert.pipeline import UnsupportedSource, convert_file
+
+    args = build_convert_parser().parse_args(argv)
+    formats = [f.strip().lower() for f in args.to.split(",") if f.strip()]
+    if not args.source.is_file():
+        print(f"floorplan: no such file: {args.source}", file=sys.stderr)
+        return 1
+    try:
+        report = convert_file(args.source, formats=formats, out_dir=args.out, sheet=args.sheet,
+                              scale=args.scale, page=args.page, units=args.units, dpi=args.dpi)
+    except (UnsupportedSource, ValueError, ImportError, OSError) as exc:
+        print(f"floorplan: {exc}", file=sys.stderr)
+        return 1
+    if not args.quiet:
+        print(f"{args.source.name}: quality {report['source_quality']}, "
+              f"scale {report['detected_scale'] or 'unknown'} [{report['scale_provenance']}], "
+              f"units {report['detected_units'] or 'unknown'} [{report['units_provenance']}]")
+        counts = {**report['verified_elements']}
+        print(f"  verified {sum(report['verified_elements'].values())}  "
+              f"calculated {sum(report['calculated_elements'].values())}  "
+              f"inferred {sum(report['inferred_elements'].values())}")
+        for w in report["warnings"]:
+            print(f"  ! {w}")
+        for fmt, path in report["outputs"].items():
+            print(f"  {fmt:11s} {path}")
+    return 0 if report["reconstruction_performed"] == "YES" else 2
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "convert":
+        return convert_main(argv[1:])
     args = build_parser().parse_args(argv)
     formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
     unknown = [f for f in formats if f not in FORMATS]

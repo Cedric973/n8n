@@ -42,12 +42,12 @@ class SceneTests(unittest.TestCase):
 
     def test_expected_layers_are_present(self):
         self.assertLessEqual(
-            {"FLOOR", "WALLS", "DOORS", "TEXT", "SHEET"}, set(self.scene.layers())
+            {"A-AREA", "A-WALL", "A-DOOR", "A-TEXT", "G-ANNO"}, set(self.scene.layers())
         )
 
     def test_dimensions_can_be_suppressed(self):
         plain = build_scene(sample_plan(), show_dimensions=False)
-        self.assertNotIn("DIMS", plain.layers())
+        self.assertNotIn("A-DIMS", plain.layers())
 
     def test_hex_parsing(self):
         self.assertEqual(hex_to_rgb("#ffffff"), (1.0, 1.0, 1.0))
@@ -103,7 +103,7 @@ class DimensionTests(unittest.TestCase):
     def test_scene_leaves_room_for_every_chain(self):
         scene = build_scene(self.plan)
         bounds = self.plan.footprint.bounds
-        dims = [i for i in scene.items if i.layer == "DIMS"]
+        dims = [i for i in scene.items if i.layer == "A-DIMS"]
         self.assertGreater(len(dims), 20)
         for item in dims:
             points = item.points if hasattr(item, "points") else [(item.x, item.y)]
@@ -116,9 +116,9 @@ class DimensionTests(unittest.TestCase):
     def test_north_arrow_clears_the_east_chain(self):
         scene = build_scene(self.plan)
         bounds = self.plan.footprint.bounds
-        east = [i for i in scene.items if i.layer == "DIMS"
+        east = [i for i in scene.items if i.layer == "A-DIMS"
                 and getattr(i, "points", None) and i.points[0][0] > bounds.x2]
-        arrow = [i for i in scene.items if i.layer == "SHEET"
+        arrow = [i for i in scene.items if i.layer == "G-ANNO"
                  and getattr(i, "points", None) and i.points[0][0] > bounds.x2]
         self.assertTrue(east and arrow)
         furthest_dim = max(x for i in east for x, _ in i.points)
@@ -203,6 +203,15 @@ class DxfTests(unittest.TestCase):
     def test_emits_linework_and_text(self):
         self.assertGreater(self.lines.count("LINE"), 50)
         self.assertGreater(self.lines.count("TEXT"), 5)
+
+    def test_walls_are_exported_as_linework(self):
+        """Walls are filled bands on paper; in CAD they must be outlines, not absent."""
+        import re
+        entities = re.findall(r"\nLINE\n8\n([^\n]+)", self.dxf)
+        on_walls = sum(1 for layer in entities if layer == "A-WALL")
+        self.assertGreater(on_walls, 40, "no wall linework in the DXF")
+        # Every wall band is a closed four-sided outline, so the count is a multiple of 4.
+        self.assertEqual(on_walls % 4, 0)
 
     def test_fill_only_layers_are_omitted(self):
         for layer in SKIP_LAYERS:
@@ -292,7 +301,7 @@ class LabelTests(unittest.TestCase):
     """Regressions found by looking at a rendered plan."""
 
     def _labels(self, plan):
-        return [t for t in build_scene(plan).texts if t.layer == "TEXT"]
+        return [t for t in build_scene(plan).texts if t.layer == "A-TEXT"]
 
     def test_fit_shrinks_text_until_it_fits(self):
         """The unit that guarantees a label fits, rather than guessing a size."""
@@ -373,7 +382,7 @@ class LabelTests(unittest.TestCase):
         plan = generate(spec, variants=1)[0]
         scene = build_scene(plan)
         bounds = plan.footprint.bounds
-        sheet = [t for t in scene.texts if t.layer == "SHEET" and t.y < bounds.y]
+        sheet = [t for t in scene.texts if t.layer == "G-ANNO" and t.y < bounds.y]
         self.assertGreaterEqual(len(sheet), 4)
         left = bounds.x + bounds.w * 0.54
         right = bounds.x + bounds.w * 0.76
