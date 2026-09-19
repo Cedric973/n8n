@@ -10,19 +10,24 @@ from http.server import ThreadingHTTPServer
 from floorplan.api import RequestError, catalog, footprint_from, generate_from, replay, spec_from
 from floorplan.server import Handler
 
-RECT = {"shape": "rectangle", "width": 48, "depth": 32, "bedrooms": 3, "bathrooms": 2}
+#: Requests in this suite state their units, because the default is metric and
+#: these assertions are about feet.
+RECT = {"shape": "rectangle", "width": 48, "depth": 32, "units": "imperial",
+        "bedrooms": 3, "bathrooms": 2}
 
 
 class FootprintTests(unittest.TestCase):
     def test_presets_have_the_requested_extents(self):
         for shape in ("rectangle", "l", "t", "u"):
             with self.subTest(shape=shape):
-                bounds = footprint_from({"shape": shape, "width": 50, "depth": 36}).bounds
+                bounds = footprint_from({"shape": shape, "width": 50, "depth": 36,
+                                         "units": "imperial"}).bounds
                 self.assertAlmostEqual(bounds.w, 50)
                 self.assertAlmostEqual(bounds.h, 36)
 
     def test_explicit_points_win_over_a_preset(self):
-        poly = footprint_from({"shape": "u", "footprint": [[0, 0], [20, 0], [20, 10], [0, 10]]})
+        poly = footprint_from({"shape": "u", "units": "imperial",
+                               "footprint": [[0, 0], [20, 0], [20, 10], [0, 10]]})
         self.assertAlmostEqual(poly.area, 200)
 
     def test_rejects_unknown_shape(self):
@@ -30,7 +35,8 @@ class FootprintTests(unittest.TestCase):
             footprint_from({"shape": "hexagon"})
 
     def test_rejects_absurd_extents(self):
-        for payload in ({"width": 2, "depth": 30}, {"width": 60, "depth": 9999}):
+        for payload in ({"width": 2, "depth": 30, "units": "imperial"},
+                        {"width": 60, "depth": 9999, "units": "imperial"}):
             with self.subTest(payload=payload):
                 with self.assertRaises(RequestError):
                     footprint_from(payload)
@@ -58,7 +64,7 @@ class SpecTests(unittest.TestCase):
 
     def test_explicit_room_list_is_honoured(self):
         spec = spec_from({
-            "shape": "rectangle", "width": 30, "depth": 24,
+            "shape": "rectangle", "width": 30, "depth": 24, "units": "imperial",
             "rooms": [{"type": "living"}, {"type": "kitchen", "name": "Galley", "sqft": 90},
                       {"type": "bedroom"}, {"type": "bathroom"}],
         })
@@ -76,6 +82,13 @@ class SpecTests(unittest.TestCase):
                 with self.assertRaises(RequestError):
                     spec_from(payload)
 
+    def test_metric_is_the_default(self):
+        """A request that says nothing gets metres, not feet."""
+        spec = spec_from({"shape": "rectangle", "bedrooms": 3, "bathrooms": 2})
+        self.assertEqual(spec.units, "metric")
+        self.assertAlmostEqual(spec.footprint.bounds.w, 15 * 3.280839895, places=6)
+        self.assertAlmostEqual(spec.footprint.bounds.h, 10 * 3.280839895, places=6)
+
     def test_title_is_truncated(self):
         self.assertLessEqual(len(spec_from(dict(RECT, title="x" * 200)).title), 80)
 
@@ -88,7 +101,8 @@ class GenerateTests(unittest.TestCase):
     def test_rejects_a_program_that_cannot_fit(self):
         with self.assertRaises(RequestError) as caught:
             generate_from({"shape": "rectangle", "width": 20, "depth": 20,
-                           "bedrooms": 8, "bathrooms": 8, "garage": True})
+                           "units": "imperial", "bedrooms": 8, "bathrooms": 8,
+                           "garage": True})
         self.assertIn("will not fit", str(caught.exception))
 
     def test_replay_reproduces_a_variant_exactly(self):

@@ -4,6 +4,8 @@ Generate residential floor plans from a footprint outline and a room program.
 Draw a shape, say how many bedrooms you want, and get back dimensioned,
 connected plans with doors and windows — as SVG, PDF or CAD-ready DXF.
 
+Metric by default: metres, m², and 1:50.
+
 No third-party dependencies at all. Python 3.10+, standard library only.
 
 ```bash
@@ -11,10 +13,9 @@ python3 -m floorplan.server          # web UI on http://127.0.0.1:8000
 python3 -m floorplan.cli --preview   # or straight to files
 ```
 
-Works in feet and inches or in metres:
-
 ```bash
-python3 -m floorplan.cli --units metric --width 17 --depth 12 --bedrooms 4
+python3 -m floorplan.cli --width 17 --depth 12 --bedrooms 4      # metres
+python3 -m floorplan.cli --units imperial --width 56 --depth 40  # feet
 ```
 
 ## The web UI
@@ -30,9 +31,9 @@ on your own machine. Don't put it on a public interface.
 
 ```bash
 python3 -m floorplan.cli \
-    --shape l --width 56 --depth 40 \
+    --shape l --width 17 --depth 12 \
     --bedrooms 4 --bathrooms 3 --garage --mudroom \
-    --title "Cedar Ridge" --variants 3 \
+    --title "Rue des Lilas" --variants 3 \
     --out plans --formats svg,pdf,png,dxf --preview
 ```
 
@@ -40,8 +41,9 @@ python3 -m floorplan.cli \
 whether a layout is sensible without opening anything. `--spec request.json`
 takes the same JSON body the HTTP API accepts.
 
-`--units metric` reads `--width` and `--depth` in metres and prints every
-dimension in metres and every area in m². The web UI has the same switch.
+`--width` and `--depth` are metres unless you pass `--units imperial`, which
+reads them as feet and prints feet, inches and square feet instead. The web UI
+has the same switch.
 
 `--sheet` and `--scale` override the automatic choice (`--sheet "ANSI C"`,
 `--scale 1:100`). Asking for a scale that will not fit on any sheet is an error
@@ -54,8 +56,10 @@ from floorplan import Polygon, PlanSpec, generate
 from floorplan.render import build_scene
 from floorplan.svg import render_svg
 
+# Footprints are always built in feet — that is the internal unit — but every
+# printed dimension follows spec.units, which defaults to metric.
 spec = PlanSpec.from_program(
-    Polygon.rectangle(48, 32), bedrooms=3, bathrooms=2, title="Maple St"
+    Polygon.rectangle(48, 32), bedrooms=3, bathrooms=2, title="Rue des Lilas"
 )
 best = generate(spec, variants=3)[0]
 print(best.summary())
@@ -72,19 +76,18 @@ edited.
 Every drawing is laid out on a standard sheet at a standard architectural
 scale, not stretched to fill the page. That is what lets two plans be compared
 side by side, and what lets a scale rule laid on a print read something true: at
-1/4" = 1'-0", a 64 ft building measures exactly 16 inches on paper.
+1:50, a 20 m building measures exactly 400 mm on paper.
 
 The scale is chosen by working outward from the largest — keeping as much detail
-as the paper allows — and then taking the smallest sheet that holds it. So a
-26 x 22 ft cottage and a 64 x 46 ft house both come out at 1/4" = 1'-0"; the
-cottage simply occupies less of its sheet, which is information rather than
-wasted paper. Only when nothing standard fits does a drawing get fitted to the
+as the paper allows — and then taking the smallest sheet that holds it. So an
+8 x 7 m cottage and a 20 x 14 m house both come out at 1:50; the cottage simply
+occupies less of its sheet, which is information rather than wasted paper. Only when nothing standard fits does a drawing get fitted to the
 largest sheet, and it is then labelled `NOT TO SCALE` rather than mislabelled.
 
 | | Sheets | Scales |
 |---|---|---|
+| Metric (default) | A4 to A1 | 1:50, 1:75, 1:100, 1:150, 1:200 |
 | Imperial | ANSI A to D | 1/4", 3/16", 1/8", 3/32", 1/16" = 1'-0" |
-| Metric | A4 to A1 | 1:50, 1:75, 1:100, 1:150, 1:200 |
 
 Scale is carried as points per foot, since the drawing is built in feet and PDF
 measures in points. Both tables fall out of `864 / ratio`, a foot being 864
@@ -94,18 +97,25 @@ DPI — so all three print at the scale they claim.
 
 ## Units
 
+**Metric is the default.** Most of the world builds in metres, and a drawing
+dimensioned in feet and inches is simply unreadable to a reader who does not
+think in them. Pass `units="imperial"` — or `--units imperial` — to get the
+other system; nothing else changes.
+
 The solver works in feet throughout — the room catalog, minimum dimensions and
 wall thicknesses are all authored that way — so units are a boundary concern.
 Lengths and areas are converted to feet on the way in and formatted back on the
 way out; nothing in the geometry or the layout knows which system you asked for,
 and the same seed produces geometrically identical plans either way.
 
-| | Imperial | Metric |
+| | Metric (default) | Imperial |
 |---|---|---|
-| Dimension | `12'-6"` | `3.81 m` |
-| Room | `12'-6" x 10'-0"` | `3.81 x 3.05 m` |
-| Area | `126 SF` | `11.7 m²` |
-| Scale bar | 10 ft | 3 m |
+| Dimension | `3.81 m` | `12'-6"` |
+| Room | `3.81 x 3.05 m` | `12'-6" x 10'-0"` |
+| Area | `11.7 m²` | `126 SF` |
+| Scale bar | 3 m | 10 ft |
+| Sheet and scale | A4–A1, 1:50–1:200 | ANSI A–D, 1/4"–1/16" = 1'-0" |
+| Default extent | 15 × 10 m | 48 × 32 ft |
 
 Metric output uses metres to two decimals rather than millimetres. Millimetres
 are the ISO convention for construction drawings, but this is a schematic tool
@@ -219,7 +229,7 @@ dimensions printed inside each room are the net, inside-face figures.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-150 tests. The layout suite checks the invariants that matter across every
+154 tests. The layout suite checks the invariants that matter across every
 footprint, program and seed: rooms tile the footprint exactly, never overlap,
 never come out with zero area, and the same seed always gives the same plan.
 The circulation suite checks that every returned plan is fully reachable from

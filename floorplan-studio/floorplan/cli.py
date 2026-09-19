@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .api import RequestError, generate_from
+from .units import DEFAULT_EXTENT, DEFAULT_UNITS, format_area
 from .dxf import DXF_ENCODING, render_dxf
 from .pdf import render_pdf
 from .preview import ascii_plan
@@ -25,10 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shape = parser.add_argument_group("footprint")
     shape.add_argument("--shape", default="rectangle", choices=("rectangle", "l", "t", "u"))
-    shape.add_argument("--width", type=float, default=48.0,
-                       help="overall east-west size, in the chosen units")
-    shape.add_argument("--depth", type=float, default=32.0,
-                       help="overall north-south size, in the chosen units")
+    shape.add_argument("--width", type=float,
+                       help="overall east-west size, in the chosen units (default 15 m)")
+    shape.add_argument("--depth", type=float,
+                       help="overall north-south size, in the chosen units (default 10 m)")
     shape.add_argument("--notch-w", type=float, help="notch width for l/u shapes")
     shape.add_argument("--notch-h", type=float, help="notch depth for l/u shapes")
     shape.add_argument("--spec", type=Path, help="JSON request file; overrides the flags above")
@@ -44,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     program.add_argument("--no-laundry", dest="laundry", action="store_false")
 
     out = parser.add_argument_group("output")
-    out.add_argument("--units", default="imperial", choices=("imperial", "metric"),
+    out.add_argument("--units", default=DEFAULT_UNITS, choices=("imperial", "metric"),
                      help="units for --width/--depth and for every printed dimension")
     out.add_argument("--title", default="Untitled Plan")
     out.add_argument("--variants", type=int, default=3)
@@ -63,8 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
 def payload_from(args: argparse.Namespace) -> dict:
     if args.spec:
         return json.loads(args.spec.read_text(encoding="utf-8"))
+    default_w, default_d = DEFAULT_EXTENT[args.units]
     return {
-        "shape": args.shape, "width": args.width, "depth": args.depth,
+        "shape": args.shape,
+        "width": args.width if args.width is not None else default_w,
+        "depth": args.depth if args.depth is not None else default_d,
         "notch_w": args.notch_w, "notch_h": args.notch_h,
         "bedrooms": args.bedrooms, "bathrooms": args.bathrooms,
         "office": args.office, "garage": args.garage, "mudroom": args.mudroom,
@@ -118,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"{stem.name}: score {summary['score']:.1f}  "
                 f"{summary['bedrooms']} bed / {summary['bathrooms']} bath  "
-                f"{summary['conditioned_sqft']} sf  "
+                f"{format_area(plan.conditioned_sqft, plan.spec.units)}  "
                 f"{scene.sheet.name} @ {scene.scale.label}  -> {', '.join(written)}"
             )
         if args.preview:

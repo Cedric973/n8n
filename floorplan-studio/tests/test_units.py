@@ -10,8 +10,9 @@ from floorplan.raster import render_png
 from floorplan.render import build_scene
 from floorplan.svg import render_svg
 from floorplan.units import (
-    IMPERIAL, METRIC, format_area, format_dimensions, format_feet, format_length,
-    from_feet, from_sqft, normalise, scale_bar_options, to_feet, to_sqft,
+    DEFAULT_EXTENT, DEFAULT_UNITS, IMPERIAL, METRIC, format_area, format_dimensions,
+    format_feet, format_length, from_feet, from_sqft, normalise, scale_bar_options,
+    to_feet, to_sqft,
 )
 
 
@@ -33,10 +34,27 @@ class ConversionTests(unittest.TestCase):
     def test_normalise_accepts_spellings_and_rejects_nonsense(self):
         for value in ("metric", "Metres", "SI", "m", "meters"):
             self.assertEqual(normalise(value), METRIC)
-        for value in ("imperial", "FT", "feet", None):
+        for value in ("imperial", "FT", "feet"):
             self.assertEqual(normalise(value), IMPERIAL)
+        self.assertEqual(normalise(None), DEFAULT_UNITS)
         with self.assertRaises(ValueError):
             normalise("cubits")
+
+
+class DefaultTests(unittest.TestCase):
+    def test_the_default_is_metric(self):
+        self.assertEqual(DEFAULT_UNITS, METRIC)
+
+    def test_a_spec_with_no_units_is_metric(self):
+        spec = PlanSpec.from_program(Polygon.rectangle(48, 32), bedrooms=2, bathrooms=1)
+        self.assertEqual(spec.units, METRIC)
+
+    def test_default_extents_are_buildable_in_both_systems(self):
+        for system, (width, depth) in DEFAULT_EXTENT.items():
+            with self.subTest(units=system):
+                area = to_feet(width, system) * to_feet(depth, system)
+                self.assertGreater(area, 400)   # big enough for a small house
+                self.assertLess(area, 4000)     # not absurd
 
 
 class FormattingTests(unittest.TestCase):

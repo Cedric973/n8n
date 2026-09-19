@@ -98,14 +98,14 @@
         <button type="button" data-shape="u" aria-pressed="false">U</button>
       </div>
       <div class="row">
-        <div><label for="width">Width <span class="unit">(ft)</span></label><input type="number" id="width" value="48" min="8" max="300" step="1"></div>
-        <div><label for="depth">Depth <span class="unit">(ft)</span></label><input type="number" id="depth" value="32" min="8" max="300" step="1"></div>
+        <div><label for="width">Width <span class="unit">(m)</span></label><input type="number" id="width" value="15" min="2.4" max="91" step="0.5"></div>
+        <div><label for="depth">Depth <span class="unit">(m)</span></label><input type="number" id="depth" value="10" min="2.4" max="91" step="0.5"></div>
       </div>
       <div class="row">
         <div><label for="units">Units</label>
           <select id="units">
-            <option value="imperial" selected>Feet and inches</option>
-            <option value="metric">Metres</option>
+            <option value="metric" selected>Metres</option>
+            <option value="imperial">Feet and inches</option>
           </select>
         </div>
         <div></div>
@@ -116,7 +116,7 @@
         <button type="button" class="mini" id="undo">Undo</button>
         <button type="button" class="mini" id="reset">Reset</button>
         <span class="spacer"></span>
-        <span class="badge" id="area">1,536 sq ft</span>
+        <span class="badge" id="area">150 m²</span>
       </div>
       <p class="hint" id="hint">Presets follow the width and depth above. Choose <em>Draw custom</em> to click out any rectilinear shape.</p>
     </section>
@@ -160,7 +160,7 @@
 <script>
 (function () {
   "use strict";
-  var GRID = 1, PRESET = "rectangle", custom = null, drawing = false, pending = [];
+  var GRID = 0.5, PRESET = "rectangle", custom = null, drawing = false, pending = [];
   var UNITS = { imperial: { grid: 1, label: "ft", area: "sq ft", w: 48, d: 32, min: 8, max: 300 },
                 metric:   { grid: 0.5, label: "m", area: "m\u00b2", w: 15, d: 10, min: 2.4, max: 91 } };
   var pad = document.getElementById("pad"), ctx = pad.getContext("2d");
@@ -190,7 +190,7 @@
 
   function currentPoints() {
     if (custom) return custom;
-    return presetPoints(PRESET, num("width", 48), num("depth", 32));
+    return presetPoints(PRESET, num("width", 15), num("depth", 10));
   }
 
   function area(points) {

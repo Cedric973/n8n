@@ -12,7 +12,7 @@ from .layout import generate, layout_once
 from .plan import Plan
 from .render import build_scene
 from .spec import CATALOG, PlanSpec, RoomSpec
-from .units import normalise, to_feet, to_sqft
+from .units import DEFAULT_EXTENT, normalise, to_feet, to_sqft
 
 SHAPES = {
     "rectangle": lambda p: Polygon.rectangle(p["width"], p["depth"]),
@@ -59,9 +59,10 @@ def footprint_from(payload: dict[str, Any]) -> Polygon:
     shape = str(payload.get("shape", "rectangle")).lower()
     if shape not in SHAPES:
         raise RequestError(f"unknown shape {shape!r}; use one of {sorted(SHAPES)}")
+    default_w, default_d = DEFAULT_EXTENT[units]
     params = {
-        "width": to_feet(float(payload.get("width", 48)), units),
-        "depth": to_feet(float(payload.get("depth", 32)), units),
+        "width": to_feet(float(payload.get("width") or default_w), units),
+        "depth": to_feet(float(payload.get("depth") or default_d), units),
     }
     for key in ("notch_w", "notch_h", "stem_w", "stem_h"):
         if payload.get(key) is not None:

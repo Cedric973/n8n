@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .geometry import Polygon
-from .units import IMPERIAL, normalise
+from .units import DEFAULT_UNITS, normalise
 
 PUBLIC, PRIVATE, SERVICE = "public", "private", "service"
 
@@ -125,7 +125,7 @@ class PlanSpec:
     entry_door_width: float = 3.0
     max_aspect: float = 2.4
     seed: int = 0
-    units: str = IMPERIAL  # presentation only; geometry is always in feet
+    units: str = DEFAULT_UNITS  # presentation only; geometry is always in feet
 
     def __post_init__(self) -> None:
         self.units = normalise(self.units)

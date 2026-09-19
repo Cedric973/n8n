@@ -103,7 +103,7 @@ def find_scale(name: str, units: str) -> Scale:
     raise ValueError(f"unknown scale {name!r}; use one of {known}")
 
 
-def choose(width_ft: float, height_ft: float, units: str = "imperial",
+def choose(width_ft: float, height_ft: float, units: str = "metric",
            sheet: str | Sheet | None = None,
            scale: str | Scale | None = None) -> tuple[Sheet, Scale]:
     """Pick the largest standard scale that fits, and the smallest sheet holding it.

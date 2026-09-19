@@ -289,7 +289,7 @@ def _tick(scene: Scene, x: float, y: float, vertical: bool, size: float = 0.28) 
 
 
 def _chain(scene: Scene, values: list[float], at: float, horizontal: bool,
-           text_offset: float, units: str = "imperial") -> None:
+           text_offset: float, units: str = "metric") -> None:
     """A dimension chain along one axis at offset ``at``."""
     if len(values) < 2:
         return
@@ -431,7 +431,7 @@ def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
                    size=_fit(label, cell.w * 0.92, 0.52), color=INK, layer="SHEET")
 
 
-def _draw_scale_bar(scene: Scene, cell: Rect, units: str = "imperial") -> None:
+def _draw_scale_bar(scene: Scene, cell: Rect, units: str = "metric") -> None:
     """A ruled bar with its ends labelled, sized to a round length."""
     options = scale_bar_options(units)
     length, label = next(((n, t) for n, t in options if n <= cell.w * 0.72), options[-1])

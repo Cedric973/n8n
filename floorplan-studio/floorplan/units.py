@@ -16,6 +16,14 @@ IMPERIAL = "imperial"
 METRIC = "metric"
 UNIT_SYSTEMS = (IMPERIAL, METRIC)
 
+#: Metric is the default: most of the world builds in metres, and a drawing
+#: dimensioned in feet and inches is unreadable to a reader who does not.
+#: Imperial remains available everywhere it was, by asking for it.
+DEFAULT_UNITS = METRIC
+
+#: Sensible starting extents per system, so a default request is buildable.
+DEFAULT_EXTENT = {METRIC: (15.0, 10.0), IMPERIAL: (48.0, 32.0)}
+
 FEET_PER_METRE = 3.280839895013123
 SQFT_PER_SQM = 10.763910416709722
 
@@ -23,7 +31,7 @@ SQFT_PER_SQM = 10.763910416709722
 def normalise(units: str | None) -> str:
     """Accept the usual spellings; anything unknown is an error, not a guess."""
     if units is None:
-        return IMPERIAL
+        return DEFAULT_UNITS
     value = str(units).strip().lower()
     aliases = {
         "imperial": IMPERIAL, "us": IMPERIAL, "ft": IMPERIAL, "feet": IMPERIAL,
@@ -62,13 +70,13 @@ def format_feet(value: float) -> str:
     return f"{feet}'-{inches}\""
 
 
-def format_length(feet: float, units: str = IMPERIAL) -> str:
+def format_length(feet: float, units: str = DEFAULT_UNITS) -> str:
     if units == METRIC:
         return f"{from_feet(feet, METRIC):.2f} m"
     return format_feet(feet)
 
 
-def format_dimensions(width_ft: float, height_ft: float, units: str = IMPERIAL) -> str:
+def format_dimensions(width_ft: float, height_ft: float, units: str = DEFAULT_UNITS) -> str:
     """A room's two sides, with the unit named once in metric."""
     if units == METRIC:
         return (f"{from_feet(width_ft, METRIC):.2f} x "
@@ -76,18 +84,18 @@ def format_dimensions(width_ft: float, height_ft: float, units: str = IMPERIAL) 
     return f"{format_feet(width_ft)} x {format_feet(height_ft)}"
 
 
-def format_area(sqft: float, units: str = IMPERIAL) -> str:
+def format_area(sqft: float, units: str = DEFAULT_UNITS) -> str:
     if units == METRIC:
         return f"{from_sqft(sqft, METRIC):.1f} m²"
     return f"{round(sqft)} SF"
 
 
-def scale_bar_options(units: str = IMPERIAL) -> list[tuple[float, str]]:
+def scale_bar_options(units: str = DEFAULT_UNITS) -> list[tuple[float, str]]:
     """Candidate bar lengths, longest first, as (feet, label)."""
     if units == METRIC:
         return [(to_feet(n, METRIC), f"{n:g} m") for n in (3, 2, 1)]
     return [(float(n), f"{n:g} FT") for n in (10, 5, 2)]
 
 
-def length_label(units: str = IMPERIAL) -> str:
+def length_label(units: str = DEFAULT_UNITS) -> str:
     return "m" if units == METRIC else "ft"
