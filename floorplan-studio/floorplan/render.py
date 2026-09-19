@@ -14,8 +14,9 @@ import math
 from datetime import date
 
 from .drawing import HAIRLINE, Path, Scene, Text
-from .geometry import Rect, Segment, format_feet
+from .geometry import Rect, Segment
 from .metrics import text_width
+from .units import format_area, format_dimensions, format_length, scale_bar_options
 from .plan import Plan, PlacedRoom
 
 INK = "#1b1b1b"
@@ -250,8 +251,9 @@ def _draw_labels(scene: Scene, plan: Plan) -> None:
         if size < MIN_LABEL or across < 1.6 * size:
             continue  # no room for a legible label
 
-        dims = f"{format_feet(net.w)} x {format_feet(net.h)}"
-        area = f"{round(net.area)} SF"
+        units = plan.spec.units
+        dims = format_dimensions(net.w, net.h, units)
+        area = format_area(net.area, units)
         detail_size = min(size * 0.7, _fit(dims, along, size * 0.7), _fit(area, along, size * 0.7))
         if across >= 4.2 * size and detail_size >= MIN_LABEL:
             scene.text(*_stack(cx, cy, size * 0.80, rotate), name, size=size, bold=True,
@@ -276,7 +278,8 @@ def _tick(scene: Scene, x: float, y: float, vertical: bool, size: float = 0.28) 
         scene.line(x - size, y - size, x + size, y + size, stroke=INK, width=HAIRLINE, layer="DIMS")
 
 
-def _chain(scene: Scene, values: list[float], at: float, horizontal: bool, text_offset: float) -> None:
+def _chain(scene: Scene, values: list[float], at: float, horizontal: bool,
+           text_offset: float, units: str = "imperial") -> None:
     """A dimension chain along one axis at offset ``at``."""
     if len(values) < 2:
         return
@@ -294,10 +297,10 @@ def _chain(scene: Scene, values: list[float], at: float, horizontal: bool, text_
             continue
         mid = (lo + hi) / 2.0
         if horizontal:
-            scene.text(mid, at + text_offset, format_feet(hi - lo), size=0.52,
+            scene.text(mid, at + text_offset, format_length(hi - lo, units), size=0.52,
                        color=INK, layer="DIMS")
         else:
-            scene.text(at + text_offset, mid, format_feet(hi - lo), size=0.52,
+            scene.text(at + text_offset, mid, format_length(hi - lo, units), size=0.52,
                        color=INK, rotate=90.0, layer="DIMS")
 
 
@@ -348,6 +351,7 @@ def _collapse(values: list[float], tol: float = 0.25) -> list[float]:
 def _draw_dimensions(scene: Scene, plan: Plan) -> None:
     """Dimension all four faces: room-by-room, then the overall run outboard."""
     bounds = plan.footprint.bounds
+    units = plan.spec.units
     for _name, along_x, far in FACES:
         divisions = _edge_divisions(plan, along_x, far)
         if len(divisions) < 2:
@@ -357,10 +361,10 @@ def _draw_dimensions(scene: Scene, plan: Plan) -> None:
             face = bounds.y2 if far else bounds.y
         else:
             face = bounds.x2 if far else bounds.x
-        _chain(scene, divisions, face + sign * 3.0, along_x, sign * 0.95)
+        _chain(scene, divisions, face + sign * 3.0, along_x, sign * 0.95, units)
         if len(divisions) > 2:
             _chain(scene, [divisions[0], divisions[-1]], face + sign * 6.0,
-                   along_x, sign * 0.95)
+                   along_x, sign * 0.95, units)
 
 
 # --------------------------------------------------------------------------
@@ -395,7 +399,8 @@ def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
 
     facts = (
         f"{summary['bedrooms']} BED   {summary['bathrooms']} BATH   "
-        f"{summary['conditioned_sqft']} SF CONDITIONED   {summary['rooms']} ROOMS"
+        f"{format_area(plan.conditioned_sqft, plan.spec.units)} CONDITIONED   "
+        f"{summary['rooms']} ROOMS"
     )
     facts_size = _fit(facts, identity - box.x - 2 * pad, 0.6)
     scene.text(box.x + pad, box.y + 1.15, facts, size=max(facts_size, 0.3),
@@ -408,13 +413,14 @@ def _draw_title_block(scene: Scene, plan: Plan, bounds: Rect) -> None:
     scene.text(box.x2 - pad, box.y + 1.15, seed,
                size=_fit(seed, box.x2 - issue - 2 * pad, 0.6),
                anchor="end", color=LIGHT, layer="SHEET")
-    _draw_scale_bar(scene, Rect(identity, box.y, issue - identity, box.h))
+    _draw_scale_bar(scene, Rect(identity, box.y, issue - identity, box.h), plan.spec.units)
 
 
-def _draw_scale_bar(scene: Scene, cell: Rect) -> None:
-    """A ruled bar with its ends labelled, sized to a round number of feet."""
-    length = next((n for n in (10.0, 5.0, 2.0) if n <= cell.w * 0.72), cell.w * 0.72)
-    ticks = 5 if length >= 5 else 4
+def _draw_scale_bar(scene: Scene, cell: Rect, units: str = "imperial") -> None:
+    """A ruled bar with its ends labelled, sized to a round length."""
+    options = scale_bar_options(units)
+    length, label = next(((n, t) for n, t in options if n <= cell.w * 0.72), options[-1])
+    ticks = 5 if length >= options[0][0] * 0.5 else 4
     x0 = cell.center[0] - length / 2.0
     y0 = cell.y + cell.h * 0.46
     step = length / ticks
@@ -428,5 +434,5 @@ def _draw_scale_bar(scene: Scene, cell: Rect) -> None:
     # never grow wider than the bar it belongs to.
     size = min(0.5, _fit("00 FT", cell.w * 0.4, 0.5))
     scene.text(x0, y0 - 0.8, "0", size=size, anchor="start", color=LIGHT, layer="SHEET")
-    scene.text(x0 + length, y0 - 0.8, f"{length:g} FT", size=size, anchor="end",
+    scene.text(x0 + length, y0 - 0.8, label, size=size, anchor="end",
                color=LIGHT, layer="SHEET")

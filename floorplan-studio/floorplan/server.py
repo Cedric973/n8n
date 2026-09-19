@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .api import RequestError, catalog, generate_from, replay
-from .dxf import render_dxf
+from .dxf import DXF_ENCODING, render_dxf
 from .pdf import render_pdf
 from .raster import render_png
 from .render import build_scene
@@ -29,7 +29,8 @@ EXPORTERS = {
     "svg": ("image/svg+xml", lambda scene: render_svg(scene).encode("utf-8")),
     "pdf": ("application/pdf", render_pdf),
     "png": ("image/png", render_png),
-    "dxf": ("image/vnd.dxf", lambda scene: render_dxf(scene).encode("utf-8")),
+    "dxf": ("image/vnd.dxf",
+            lambda scene: render_dxf(scene).encode(DXF_ENCODING, "replace")),
 }
 
 

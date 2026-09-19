@@ -19,6 +19,9 @@ LAYER_COLORS = {
 }
 DEFAULT_COLOR = 7
 
+#: R12 predates Unicode; files are read as this code page.
+DXF_ENCODING = "cp1252"
+
 #: Layers that carry only fills and would be noise as outlines in CAD.
 SKIP_LAYERS = {"FLOOR", "OPENINGS"}
 
@@ -48,6 +51,8 @@ def _header() -> list[str]:
     out: list[str] = []
     _pair(out, 9, "$ACADVER")
     _pair(out, 1, "AC1009")
+    _pair(out, 9, "$DWGCODEPAGE")
+    _pair(out, 3, "ANSI_1252")
     _pair(out, 9, "$INSUNITS")
     _pair(out, 70, 2)  # feet
     return out

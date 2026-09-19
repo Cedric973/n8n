@@ -11,6 +11,12 @@ python3 -m floorplan.server          # web UI on http://127.0.0.1:8000
 python3 -m floorplan.cli --preview   # or straight to files
 ```
 
+Works in feet and inches or in metres:
+
+```bash
+python3 -m floorplan.cli --units metric --width 17 --depth 12 --bedrooms 4
+```
+
 ## The web UI
 
 `python3 -m floorplan.server` serves a single-page app: pick a preset footprint
@@ -34,6 +40,9 @@ python3 -m floorplan.cli \
 whether a layout is sensible without opening anything. `--spec request.json`
 takes the same JSON body the HTTP API accepts.
 
+`--units metric` reads `--width` and `--depth` in metres and prints every
+dimension in metres and every area in m². The web UI has the same switch.
+
 ## As a library
 
 ```python
@@ -53,6 +62,29 @@ Footprints can be `rectangle`, `l_shape`, `t_shape`, `u_shape`, or any
 rectilinear `Polygon` you pass vertices for. Room types, target areas, minimum
 dimensions and adjacency preferences all live in `spec.py` and are meant to be
 edited.
+
+## Units
+
+The solver works in feet throughout — the room catalog, minimum dimensions and
+wall thicknesses are all authored that way — so units are a boundary concern.
+Lengths and areas are converted to feet on the way in and formatted back on the
+way out; nothing in the geometry or the layout knows which system you asked for,
+and the same seed produces geometrically identical plans either way.
+
+| | Imperial | Metric |
+|---|---|---|
+| Dimension | `12'-6"` | `3.81 m` |
+| Room | `12'-6" x 10'-0"` | `3.81 x 3.05 m` |
+| Area | `126 SF` | `11.7 m²` |
+| Scale bar | 10 ft | 3 m |
+
+Metric output uses metres to two decimals rather than millimetres. Millimetres
+are the ISO convention for construction drawings, but this is a schematic tool
+and `5.03 m` reads better than `5030` for someone sizing a house.
+
+Because `m²` is outside ASCII, DXF is written as CP1252 with a `$DWGCODEPAGE`
+header rather than UTF-8 — R12 predates Unicode, and a file the CAD package
+mis-decodes is worse than one that says which code page it used.
 
 ## How it generates a plan
 
@@ -145,6 +177,7 @@ dimensions printed inside each room are the net, inside-face figures.
 | `render.py` | Plan to scene: walls, swings, labels, dimensions, title block |
 | `svg.py` `pdf.py` `dxf.py` `raster.py` | Scene to file |
 | `metrics.py` | Helvetica character widths, for placing and fitting text |
+| `units.py` | Imperial and metric conversion and formatting |
 | `font.py` | Single-stroke vector font, used only by the rasteriser |
 | `preview.py` | ASCII plan for the terminal |
 | `api.py` | JSON request to spec, shared by the CLI and the server |
@@ -156,7 +189,7 @@ dimensions printed inside each room are the net, inside-face figures.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-109 tests. The layout suite checks the invariants that matter across every
+130 tests. The layout suite checks the invariants that matter across every
 footprint, program and seed: rooms tile the footprint exactly, never overlap,
 never come out with zero area, and the same seed always gives the same plan.
 The circulation suite checks that every returned plan is fully reachable from
@@ -164,11 +197,16 @@ the front door and that no bathroom or closet is a through-route. The export
 suite validates the PDF cross-reference table and stream lengths, DXF group-code
 pairing, PNG chunk CRCs, and SVG well-formedness by parsing it.
 
+The units suite checks that conversion happens at the boundary and nowhere else:
+metric output carries no feet marks, imperial output carries no `m²`, and the
+same seed lays out identically under either system.
+
 The drawing tests are written to fail if their fix is reverted, which is worth
 stating because the first versions of three of them did not: they grouped label
 lines in a way that left the assertion unreached, and passed happily against
 deliberately broken code. If you add one, break the thing it guards and watch it
-fail before trusting it.
+fail before trusting it — and make the edit assert that it actually applied, or
+a silently failed patch will look like a passing test.
 
 ## Known limitations
 

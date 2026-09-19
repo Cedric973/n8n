@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .geometry import Polygon
+from .units import IMPERIAL, normalise
 
 PUBLIC, PRIVATE, SERVICE = "public", "private", "service"
 
@@ -124,8 +125,10 @@ class PlanSpec:
     entry_door_width: float = 3.0
     max_aspect: float = 2.4
     seed: int = 0
+    units: str = IMPERIAL  # presentation only; geometry is always in feet
 
     def __post_init__(self) -> None:
+        self.units = normalise(self.units)
         if not self.rooms:
             raise ValueError("a plan needs at least one room")
         for room in self.rooms:
@@ -216,13 +219,14 @@ class PlanSpec:
             "door_width": self.door_width,
             "max_aspect": self.max_aspect,
             "seed": self.seed,
+            "units": self.units,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PlanSpec":
         known = {
             "title", "exterior_wall", "interior_wall", "hall_width",
-            "door_width", "entry_door_width", "max_aspect", "seed",
+            "door_width", "entry_door_width", "max_aspect", "seed", "units",
         }
         kwargs = {k: data[k] for k in known if k in data and data[k] is not None}
         return cls(

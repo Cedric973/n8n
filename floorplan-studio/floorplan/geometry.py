@@ -343,8 +343,5 @@ def _drop_collinear(pts: list[Point]) -> list[Point]:
     return out
 
 
-def format_feet(value: float) -> str:
-    """12.5 -> ``12'-6"``, rounded to the nearest inch."""
-    total_inches = round(value * 12.0)
-    feet, inches = divmod(int(total_inches), 12)
-    return f"{feet}'-{inches}\""
+#: Re-exported for convenience; the formatting itself lives in :mod:`floorplan.units`.
+from .units import format_feet  # noqa: E402,F401  (kept at the bottom to avoid a cycle)

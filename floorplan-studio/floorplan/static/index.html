@@ -53,6 +53,7 @@
   .canvas-tools { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
   .canvas-tools .spacer { flex: 1; }
   .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .unit { color: var(--muted); }
   .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
   .toggles label { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 14px; margin: 0; cursor: pointer; }
   button.primary {
@@ -97,8 +98,17 @@
         <button type="button" data-shape="u" aria-pressed="false">U</button>
       </div>
       <div class="row">
-        <div><label for="width">Width (ft)</label><input type="number" id="width" value="48" min="8" max="300" step="1"></div>
-        <div><label for="depth">Depth (ft)</label><input type="number" id="depth" value="32" min="8" max="300" step="1"></div>
+        <div><label for="width">Width <span class="unit">(ft)</span></label><input type="number" id="width" value="48" min="8" max="300" step="1"></div>
+        <div><label for="depth">Depth <span class="unit">(ft)</span></label><input type="number" id="depth" value="32" min="8" max="300" step="1"></div>
+      </div>
+      <div class="row">
+        <div><label for="units">Units</label>
+          <select id="units">
+            <option value="imperial" selected>Feet and inches</option>
+            <option value="metric">Metres</option>
+          </select>
+        </div>
+        <div></div>
       </div>
       <canvas id="pad" width="600" height="460"></canvas>
       <div class="canvas-tools">
@@ -151,6 +161,8 @@
 (function () {
   "use strict";
   var GRID = 1, PRESET = "rectangle", custom = null, drawing = false, pending = [];
+  var UNITS = { imperial: { grid: 1, label: "ft", area: "sq ft", w: 48, d: 32, min: 8, max: 300 },
+                metric:   { grid: 0.5, label: "m", area: "m\u00b2", w: 15, d: 10, min: 2.4, max: 91 } };
   var pad = document.getElementById("pad"), ctx = pad.getContext("2d");
   var $ = function (id) { return document.getElementById(id); };
 
@@ -243,9 +255,11 @@
         ctx.fillStyle = i === 0 && drawing ? c.accent : c.ink; ctx.fill();
       });
     }
+    var u = UNITS[$("units").value];
     var sq = drawing ? 0 : area(pts);
-    $("area").textContent = sq ? Math.round(sq).toLocaleString() + " sq ft"
-                               : "click to close the shape";
+    $("area").textContent = sq
+      ? (sq < 100 ? sq.toFixed(1) : Math.round(sq).toLocaleString()) + " " + u.area
+      : "click to close the shape";
   }
 
   pad.addEventListener("pointerdown", function (ev) {
@@ -275,7 +289,7 @@
       var prev = pts[pts.length - 2];
       pts.push(prev[1] === last[1] ? [last[0], first[1]] : [first[0], last[1]]);
     }
-    if (pts.length < 4 || area(pts) < 100) {
+    if (pts.length < 4 || area(pts) < ($("units").value === "metric" ? 10 : 100)) {
       showError("That shape is too small or not closed — try again.");
       return reset();
     }
@@ -323,6 +337,22 @@
   ["width", "depth"].forEach(function (id) {
     $(id).addEventListener("input", function () { if (!custom) draw(); });
   });
+  $("units").addEventListener("change", function () {
+    var u = UNITS[this.value];
+    GRID = u.grid;
+    Array.prototype.forEach.call(document.querySelectorAll(".unit"), function (el) {
+      el.textContent = "(" + u.label + ")";
+    });
+    ["width", "depth"].forEach(function (id, i) {
+      var input = $(id);
+      input.min = u.min; input.max = u.max;
+      input.step = this.value === "metric" ? 0.5 : 1;
+      input.value = i === 0 ? u.w : u.d;
+    }, this);
+    custom = null; drawing = false; pending = [];
+    $("draw").textContent = "Draw custom";
+    draw();
+  });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
 
   // ---- requests ----------------------------------------------------------
@@ -334,7 +364,8 @@
       office: $("office").checked, garage: $("garage").checked,
       mudroom: $("mudroom").checked, formal_dining: $("formal_dining").checked,
       pantry: $("pantry").checked, laundry: $("laundry").checked,
-      variants: num("variants", 3), seed: num("seed", 0)
+      variants: num("variants", 3), seed: num("seed", 0),
+      units: $("units").value
     };
   }
 

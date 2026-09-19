@@ -12,6 +12,7 @@ from .layout import generate, layout_once
 from .plan import Plan
 from .render import build_scene
 from .spec import CATALOG, PlanSpec, RoomSpec
+from .units import normalise, to_feet, to_sqft
 
 SHAPES = {
     "rectangle": lambda p: Polygon.rectangle(p["width"], p["depth"]),
@@ -33,7 +34,16 @@ class RequestError(ValueError):
     """The payload is not a usable plan request."""
 
 
+def units_from(payload: dict[str, Any]) -> str:
+    try:
+        return normalise(payload.get("units"))
+    except ValueError as exc:
+        raise RequestError(str(exc)) from exc
+
+
 def footprint_from(payload: dict[str, Any]) -> Polygon:
+    """Build the footprint, converting the caller's units to feet."""
+    units = units_from(payload)
     points = payload.get("footprint")
     if points:
         if len(points) < 4:
@@ -41,7 +51,8 @@ def footprint_from(payload: dict[str, Any]) -> Polygon:
         if len(points) > 64:
             raise RequestError("footprint has too many corners (limit 64)")
         try:
-            return Polygon([(float(x), float(y)) for x, y in points])
+            return Polygon([(to_feet(float(x), units), to_feet(float(y), units))
+                            for x, y in points])
         except (TypeError, ValueError) as exc:
             raise RequestError(f"invalid footprint: {exc}") from exc
 
@@ -49,14 +60,15 @@ def footprint_from(payload: dict[str, Any]) -> Polygon:
     if shape not in SHAPES:
         raise RequestError(f"unknown shape {shape!r}; use one of {sorted(SHAPES)}")
     params = {
-        "width": float(payload.get("width", 48)),
-        "depth": float(payload.get("depth", 32)),
+        "width": to_feet(float(payload.get("width", 48)), units),
+        "depth": to_feet(float(payload.get("depth", 32)), units),
     }
     for key in ("notch_w", "notch_h", "stem_w", "stem_h"):
         if payload.get(key) is not None:
-            params[key] = float(payload[key])
+            params[key] = to_feet(float(payload[key]), units)
     if not (8 <= params["width"] <= 300 and 8 <= params["depth"] <= 300):
-        raise RequestError("width and depth must be between 8 and 300 feet")
+        raise RequestError(
+            "width and depth must be between 8 and 300 feet (2.4 and 91 metres)")
     try:
         return SHAPES[shape](params)
     except ValueError as exc:
@@ -66,6 +78,7 @@ def footprint_from(payload: dict[str, Any]) -> Polygon:
 def spec_from(payload: dict[str, Any]) -> PlanSpec:
     """Build a spec from either an explicit room list or a room-count program."""
     footprint = footprint_from(payload)
+    units = units_from(payload)
     title = str(payload.get("title") or "Untitled Plan")[:80]
     seed = int(payload.get("seed", 0))
 
@@ -80,8 +93,10 @@ def spec_from(payload: dict[str, Any]) -> PlanSpec:
                 raise RequestError(f"unknown room type {key!r}")
             name = entry.get("name") if isinstance(entry, dict) else None
             sqft = entry.get("sqft") if isinstance(entry, dict) else None
-            specs.append(RoomSpec(key, name, float(sqft) if sqft else None))
-        return PlanSpec(footprint=footprint, rooms=specs, title=title, seed=seed)
+            specs.append(RoomSpec(key, name,
+                                  to_sqft(float(sqft), units) if sqft else None))
+        return PlanSpec(footprint=footprint, rooms=specs, title=title, seed=seed,
+                        units=units)
 
     program = {}
     for key, cast in PROGRAM_KEYS.items():
@@ -92,7 +107,8 @@ def spec_from(payload: dict[str, Any]) -> PlanSpec:
     if not 1 <= program.get("bathrooms", 2) <= 8:
         raise RequestError("bathrooms must be between 1 and 8")
     try:
-        return PlanSpec.from_program(footprint, title=title, seed=seed, **program)
+        return PlanSpec.from_program(footprint, title=title, seed=seed,
+                                     units=units, **program)
     except ValueError as exc:
         raise RequestError(str(exc)) from exc
 

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .api import RequestError, generate_from
-from .dxf import render_dxf
+from .dxf import DXF_ENCODING, render_dxf
 from .pdf import render_pdf
 from .preview import ascii_plan
 from .raster import render_png
@@ -25,8 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shape = parser.add_argument_group("footprint")
     shape.add_argument("--shape", default="rectangle", choices=("rectangle", "l", "t", "u"))
-    shape.add_argument("--width", type=float, default=48.0, help="overall east-west feet")
-    shape.add_argument("--depth", type=float, default=32.0, help="overall north-south feet")
+    shape.add_argument("--width", type=float, default=48.0,
+                       help="overall east-west size, in the chosen units")
+    shape.add_argument("--depth", type=float, default=32.0,
+                       help="overall north-south size, in the chosen units")
     shape.add_argument("--notch-w", type=float, help="notch width for l/u shapes")
     shape.add_argument("--notch-h", type=float, help="notch depth for l/u shapes")
     shape.add_argument("--spec", type=Path, help="JSON request file; overrides the flags above")
@@ -42,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     program.add_argument("--no-laundry", dest="laundry", action="store_false")
 
     out = parser.add_argument_group("output")
+    out.add_argument("--units", default="imperial", choices=("imperial", "metric"),
+                     help="units for --width/--depth and for every printed dimension")
     out.add_argument("--title", default="Untitled Plan")
     out.add_argument("--variants", type=int, default=3)
     out.add_argument("--seed", type=int, default=0)
@@ -62,7 +66,7 @@ def payload_from(args: argparse.Namespace) -> dict:
         "bedrooms": args.bedrooms, "bathrooms": args.bathrooms,
         "office": args.office, "garage": args.garage, "mudroom": args.mudroom,
         "formal_dining": args.formal_dining, "pantry": args.pantry,
-        "laundry": args.laundry, "title": args.title,
+        "laundry": args.laundry, "title": args.title, "units": args.units,
         "variants": args.variants, "seed": args.seed,
     }
 
@@ -95,7 +99,8 @@ def main(argv: list[str] | None = None) -> int:
             stem.with_suffix(".png").write_bytes(render_png(scene))
             written.append("png")
         if "dxf" in formats:
-            stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding="utf-8")
+            stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding=DXF_ENCODING,
+                                                errors="replace")
             written.append("dxf")
         if "json" in formats:
             stem.with_suffix(".json").write_text(
