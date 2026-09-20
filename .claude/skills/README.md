@@ -5,11 +5,11 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **456 skills** (386 flat + the 59-skill gstack suite + the 9-skill
-  understand-anything suite + the 2-skill remotion-superpowers suite), each an
-  `.claude/skills/<name>/SKILL.md` (the gstack, understand-anything and
-  remotion-superpowers suites are nested under their own directories, discovered
-  recursively).
+- **539 skills** (386 flat + the 59-skill gstack suite + the 9-skill
+  understand-anything suite + the 2-skill remotion-superpowers suite + the
+  83-skill trailofbits suite), each an `.claude/skills/<name>/SKILL.md` (the
+  gstack, understand-anything, remotion-superpowers and trailofbits suites are
+  nested under their own directories, discovered recursively).
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -157,6 +157,27 @@ Vendored individually from their own repos (not part of the claude-skills librar
   it: `awesome-agent-skills/references/INDEX.md` (220 KB, grep-searchable,
   works offline) + the list's security guidance and this base's
   vendor-a-pick workflow. Snapshot: 2026-09-20; refresh steps in the skill.
+- **trailofbits (83 skills)** — security-audit skills from Trail of Bits, the
+  firm that audits real crypto protocols. Vendored as a nested tree under
+  `.claude/skills/trailofbits/` from
+  [trailofbits/skills](https://github.com/trailofbits/skills): the whole
+  `plugins/` marketplace (44 plugins) minus test fixtures, with its LICENSE,
+  README and AGENTS.md kept. **License is CC-BY-SA-4.0** (attribution +
+  share-alike — not MIT like most of this base; derivative skill files must
+  carry the same license). Highlights: `static-analysis` (`semgrep`, `codeql`,
+  `sarif-parsing`), `semgrep-rule-creator` / `-variant-creator`,
+  `mutation-testing`, `property-based-testing`, `differential-review`,
+  `variant-analysis`, `supply-chain-risk-auditor`, `insecure-defaults`,
+  `constant-time-analysis`, `zeroize-audit`, `entry-point-analyzer`,
+  `vulnerability-triage-brocards`, `building-secure-contracts` (vulnerability
+  scanners for 6 blockchains), `testing-handbook-skills` (fuzzing: AFL++,
+  cargo-fuzz, atheris, sanitizers, coverage), `c-review` / `rust-review` /
+  `modern-cpp` / `modern-python`, `audit-context-building`, `fp-check`,
+  `second-opinion`, `code-improver`, `burpsuite-project-parser`,
+  `firebase-apk-scanner`, `yara-authoring`, `dwarf-expert`. Typical use: run
+  an audit skill on a diff before shipping. Several skills shell out to tools
+  that must be installed (semgrep, codeql, fuzzers, sanitizers); the nested
+  `CLAUDE.md`/`AGENTS.md` are not auto-loaded from here.
 
 ## Updating
 
