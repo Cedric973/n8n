@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **455 skills** (385 flat + the 59-skill gstack suite + the 9-skill
+- **456 skills** (386 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite + the 2-skill remotion-superpowers suite), each an
   `.claude/skills/<name>/SKILL.md` (the gstack, understand-anything and
   remotion-superpowers suites are nested under their own directories, discovered
@@ -148,6 +148,15 @@ Vendored individually from their own repos (not part of the claude-skills librar
   `hooks.json` are NOT auto-loaded from here (Claude Code only reads those at
   the project root); copy the servers you want into the root `.mcp.json` and
   set the keys. Follow `setup-guide` first.
+- **awesome-agent-skills** — a local skill *finder*: answers "is there a skill
+  for X?" from a vendored snapshot of
+  [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills)
+  (MIT), an index of 1,497+ curated skills (official ones from Anthropic,
+  Stripe, Google, Vercel, plus vetted community skills) with install links.
+  The upstream repo is only a README, so this skill was authored here around
+  it: `awesome-agent-skills/references/INDEX.md` (220 KB, grep-searchable,
+  works offline) + the list's security guidance and this base's
+  vendor-a-pick workflow. Snapshot: 2026-09-20; refresh steps in the skill.
 
 ## Updating
 
