@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **420 skills** (352 flat + the 59-skill gstack suite + the 9-skill
+- **421 skills** (353 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
   and understand-anything suites are nested under their own directories, discovered
   recursively).
@@ -81,6 +81,15 @@ Vendored individually from their own repos (not part of the claude-skills librar
   packages and reference `${CLAUDE_PLUGIN_ROOT}`; no prebuilt `dist/` ships, so
   full graph/dashboard features need `pnpm install && build` inside
   `.claude/skills/understand-anything/` on a machine that can run it.
+- **last30days** — research what people actually said about any topic in the
+  last 30 days across Reddit, X, YouTube, TikTok, Hacker News, Polymarket,
+  GitHub and the web, ranked by real engagement; includes a `doctor` health
+  check for sources. Use: `/last30days <topic>`. From
+  [mvanhorn/last30days-skill](https://github.com/mvanhorn/last30days-skill)
+  (v3.25.0). Packaged per upstream's `.skillignore`: the 14 MB demo `assets/`,
+  `agents/` and dev/eval scripts are omitted; runtime `scripts/` (incl. the
+  vendored X-search client) are kept. Live searches need outbound network
+  access and per-source API keys — see `CONFIGURATION.md` upstream.
 
 ## Updating
 
