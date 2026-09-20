@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **539 skills** (386 flat + the 59-skill gstack suite + the 9-skill
+- **553 skills** (400 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite + the 2-skill remotion-superpowers suite + the
   83-skill trailofbits suite), each an `.claude/skills/<name>/SKILL.md` (the
   gstack, understand-anything, remotion-superpowers and trailofbits suites are
@@ -178,6 +178,23 @@ Vendored individually from their own repos (not part of the claude-skills librar
   an audit skill on a diff before shipping. Several skills shell out to tools
   that must be installed (semgrep, codeql, fuzzers, sanitizers); the nested
   `CLAUDE.md`/`AGENTS.md` are not auto-loaded from here.
+- **AI Sales Team (14 skills + 5 agents)** — a full sales pipeline in Claude
+  Code: `/sales prospect <url>` (5 parallel subagents → prospect score),
+  `research`, `qualify` (BANT + MEDDIC), `contacts`, `outreach`, `followup`,
+  `prep`, `proposal`, `objections`, `icp`, `competitors`, `report`,
+  `report-pdf`. From
+  [zubair-trabzada/ai-sales-team-claude](https://github.com/zubair-trabzada/ai-sales-team-claude)
+  (MIT), laid out as its `install.sh` does: router at `.claude/skills/sales/`
+  (with its `scripts/`, `templates/`, LICENSE, README), the 13 sub-skills flat
+  as `.claude/skills/sales-*/`, and the 5 subagents (`sales-company`,
+  `sales-contacts`, `sales-opportunity`, `sales-competitive`,
+  `sales-strategy`) registered in **`.claude/agents/`** so the parallel
+  `/sales prospect` flow can invoke them. NOTE: upstream ships these files
+  with **no YAML frontmatter**, which makes them invisible to Claude Code
+  skill discovery — `name`/`description` frontmatter was generated here from
+  each file's title and opening paragraph. Python helpers need
+  `pip install -r .claude/skills/sales/requirements.txt` (reportlab,
+  beautifulsoup4, requests — free); live research needs outbound web access.
 
 ## Updating
 
