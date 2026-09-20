@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **409 skills** (350 flat + the 59-skill gstack suite), each an
+- **410 skills** (351 flat + the 59-skill gstack suite), each an
   `.claude/skills/<name>/SKILL.md` (gstack skills are nested under
   `.claude/skills/gstack/`, discovered recursively).
 - Skills are flattened to one directory per skill (Claude Code discovers direct
@@ -57,6 +57,9 @@ Vendored individually from their own repos (not part of the claude-skills librar
   binary and registers commands); that build step was **not** run here, so skills
   that shell out to the built binary or expect a user-level install may need
   `./setup` run in `.claude/skills/gstack/` first.
+- **stop-slop** — strip predictable AI-writing tells (em-dashes, "it's not X,
+  it's Y", hollow intros) from prose when drafting/editing/reviewing. From
+  [hardikpandya/stop-slop](https://github.com/hardikpandya/stop-slop).
 
 ## Updating
 
