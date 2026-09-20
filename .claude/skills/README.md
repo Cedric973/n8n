@@ -5,9 +5,10 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **453 skills** (385 flat + the 59-skill gstack suite + the 9-skill
-  understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
-  and understand-anything suites are nested under their own directories, discovered
+- **455 skills** (385 flat + the 59-skill gstack suite + the 9-skill
+  understand-anything suite + the 2-skill remotion-superpowers suite), each an
+  `.claude/skills/<name>/SKILL.md` (the gstack, understand-anything and
+  remotion-superpowers suites are nested under their own directories, discovered
   recursively).
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
@@ -132,6 +133,21 @@ Vendored individually from their own repos (not part of the claude-skills librar
   for ChatGPT/GPT rather than Claude). The repo's demo `assets/` and
   `examples/` (2.7 MB) are omitted — not part of any skill. For this repo,
   pair with `frontend-design`, `motion-v`, and `design-md`.
+- **remotion-superpowers** — a full video-production studio on top of
+  [Remotion](https://www.remotion.dev): describe a video and render a real MP4
+  with narration, captions, music, stock footage, transitions, 3D and an AI
+  review loop. Vendored as a nested tree under
+  `.claude/skills/remotion-superpowers/` from
+  [DojoCodingLabs/remotion-superpowers](https://github.com/DojoCodingLabs/remotion-superpowers)
+  (MIT): 2 skills (`remotion-production`, `setup-guide`), 13 commands
+  (`/create-video`, `/create-short`, `/add-captions`, …), agents, hooks, and an
+  `.mcp.json`. Remotion rendering itself is free and local (Node). The
+  optional add-ons are wired as 5 MCP servers that need API keys —
+  ElevenLabs (voiceover), Replicate (image/video gen), TwelveLabs (video
+  review), KIE (media), Pexels (stock, free tier). The nested `.mcp.json` and
+  `hooks.json` are NOT auto-loaded from here (Claude Code only reads those at
+  the project root); copy the servers you want into the root `.mcp.json` and
+  set the keys. Follow `setup-guide` first.
 
 ## Updating
 
