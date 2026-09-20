@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **440 skills** (372 flat + the 59-skill gstack suite + the 9-skill
+- **453 skills** (385 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
   and understand-anything suites are nested under their own directories, discovered
   recursively).
@@ -119,6 +119,19 @@ Vendored individually from their own repos (not part of the claude-skills librar
   generators (`lib/`) usable without a browser and the canonical format
   blueprint at `design-md/references/DESIGN-BLUEPRINT.md`. Note: extracting
   from a live site needs a real Chrome on your machine.
+- **Taste (13 skills)** — "gives your AI good taste": generates several design
+  variants, critiques them, and ships the one with the best taste instead of
+  first-draft UI. From [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill)
+  (MIT). Each skill is vendored under its **frontmatter name** (upstream's folder
+  names differ): `design-taste-frontend` (the main one; hand it a rough UI and
+  get a refined layout/spacing/motion), `design-taste-frontend-v1` (legacy),
+  `redesign-existing-projects`, `high-end-visual-design`,
+  `industrial-brutalist-ui`, `minimalist-ui`, `brandkit`, `image-to-code`,
+  `imagegen-frontend-web`, `imagegen-frontend-mobile`, `stitch-design-taste`
+  (Google Stitch), `full-output-enforcement`, and `gpt-taste` (a variant tuned
+  for ChatGPT/GPT rather than Claude). The repo's demo `assets/` and
+  `examples/` (2.7 MB) are omitted — not part of any skill. For this repo,
+  pair with `frontend-design`, `motion-v`, and `design-md`.
 
 ## Updating
 
