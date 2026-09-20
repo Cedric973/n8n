@@ -74,6 +74,10 @@ def report_markdown(report: dict) -> str:
         block("Calculated elements", report["calculated_elements"]),
         block("Inferred elements", report["inferred_elements"]),
         block("Unknown elements", report["unknown_elements"]),
+        "**Readability (text overlaps / small print / text on walls):**",
+        *([f"- {level}: {r['overlap']} overlap(s), {r['small']} small, {r['over-wall']} on walls"
+           for level, r in report.get("readability", {}).items()] or ["- not checked"]),
+        "",
         "**Warnings:**",
         *([f"- {w}" for w in report["warnings"]] or ["- none"]),
         "",

@@ -174,9 +174,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
+    from .quality import check_scene
     for rank, plan in enumerate(plans, start=1):
         written = []
         scene = None
+        issues = []
         for level in levels:
             try:
                 scene = build_scene(plan, sheet=payload.get("sheet"), scale=payload.get("scale"),
@@ -196,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
                 stem.with_suffix(".dxf").write_text(render_dxf(scene), encoding=DXF_ENCODING,
                                                     errors="replace")
             written.append(stem.name)
+            issues += [(level, i) for i in check_scene(scene)]
         if "json" in formats:
             (args.out / f"plan-{rank}-seed{plan.seed}.json").write_text(
                 json.dumps(plan.to_dict(), indent=2), encoding="utf-8")
@@ -208,6 +211,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"{scene.sheet.name} @ {scene.scale.label}  -> {', '.join(formats)} x "
                 f"{', '.join(levels)}"
             )
+            for level, issue in issues[:8]:
+                print(f"  ! readability ({level}): {issue}")
+            if len(issues) > 8:
+                print(f"  ! readability: {len(issues) - 8} more")
         if args.preview:
             print(ascii_plan(plan))
             print()

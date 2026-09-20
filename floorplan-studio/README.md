@@ -82,6 +82,23 @@ The words VERIFIED, INFERRED and so on never appear on the client or dimension
 plan. They belong to the technical plan and the conversion report, which is
 where a checker looks for them.
 
+Generated plans carry the few fixtures that make a room read as what it is:
+a bed and nightstands in each bedroom, tub, WC and basin in each bath, a
+counter run with sink and range in the kitchen. They sit against door-free
+walls, never in a door's swing, and never under the room's label.
+
+### Readability check
+
+Every sheet is checked before it is written (`floorplan/quality.py`): two
+texts whose boxes overlap, text that would print under 1.8 mm at the sheet's
+scale, and a room label lying on a wall are each reported. The generator
+prints them per plan; the converter puts a count per level in the report.
+The client plan of a generated house has none by construction — labels step
+out of door swings and fixtures keep clear of labels — and the test suite
+holds that across footprints. A converted dimension plan usually has some,
+because the source's own figures, enlarged to legible size, land on each
+other; the count says how many.
+
 ## Converting an existing plan
 
 ```bash
@@ -101,7 +118,28 @@ re-issued plan in each requested format plus `plan-report.md` and
 | DWG, DWF, RVT, IFC | — | refused with the export step that would work (DXF) |
 | PNG, JPG, TIFF, scans, photos | — | refused; raster reconstruction is not implemented |
 
+On a converted plan the client sheet also gets its own dimension chains on
+the south and west faces, read off the reconstructed walls: bay marks where
+a wall meets the face and both ends of each window in it, plus the overall
+run. The dimension and technical sheets keep the source's dimensions instead
+and get our chains only when the source had none — a plan is not
+dimensioned twice. Room labels on the client and dimension sheets are set in
+the middle of their room when a flood fill of the source's linework finds a
+room whose area agrees with the printed one; otherwise they stay where the
+source put them.
+
 ### What the analyzer does, and how far to trust it
+
+Doors are recognised by their swing: a native arc, a flattened polyline on
+one circle, a swing the export split into pieces (rejoined when the pieces
+share a centre and radius and their sweeps add up), or a lone 45° half-swing
+whose hinge sits on a wall. Each door then gets its leaf, from the hinge to
+the end of the arc that stands out in the room. Windows are recognised two
+ways: two or three glazing lines a few centimetres apart inside a wall, or a
+gap in a wall run closed by one thin line along it — the way most plans draw
+glass — which is redrawn as the standard symbol. Openings also join the wall
+runs either side of them, so a building whose halves meet only at a window
+is still one building to the pruning step.
 
 Everything the converter knows carries a provenance, on every entity and on
 the drawing's units and scale, and nothing is promoted silently:
@@ -362,7 +400,7 @@ dimensions printed inside each room are the net, inside-face figures.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-210 tests. The layout suite checks the invariants that matter across every
+226 tests. The layout suite checks the invariants that matter across every
 footprint, program and seed: rooms tile the footprint exactly, never overlap,
 never come out with zero area, and the same seed always gives the same plan.
 The circulation suite checks that every returned plan is fully reachable from
@@ -407,13 +445,20 @@ a silently failed patch will look like a passing test.
 - **Schematic only.** This is a massing and layout tool. It knows nothing about
   structure, egress, energy or your local code, and its output is not a
   construction document.
-- **No automated readability test.** The 100 / 50 / 25 % zoom check is done
-  by looking at the PNG. What is enforced is the 2 mm text floor and the line
-  hierarchy; the PNG exists so the rest can be seen.
+- **The readability check is mechanical.** It sees text boxes, wall fills
+  and print size; it does not see a bed drawn through a door or a chain that
+  crosses a north arrow. The PNG exists so the rest can be seen.
 - **Word spacing in converted labels is a guess.** A PDF font with no space
   glyph hands over `KitchenLunchRoom`; the client and dimension plans put a
-  space back before each capital or digit, the technical plan keeps the source
-  text as it was. `Rentedspace 2` is as far as that rule can go.
+  space back before each capital or digit, and between the words of a short
+  English/French room vocabulary (`Rentedspace` → `Rented space`). The
+  technical plan keeps the source text as it was. A name outside that
+  vocabulary stays joined.
+- **Oblique walls come back stepped.** Hatch reconstruction works on a 5 cm
+  grid, so a wall at an angle is a staircase of small rectangles, and rooms
+  behind it are not always sealed for the label fill.
+- **Open-plan labels stay put.** Where zones share one space, the fill finds
+  the whole floor and the label is left where the source drew it.
 - **The PDF has not been opened.** Its structure is validated — cross-reference
   offsets, stream lengths, escaping — its page size and scale are asserted, and
   it shares its geometry with the PNG, which has been looked at. But no PDF

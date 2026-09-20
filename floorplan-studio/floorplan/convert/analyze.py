@@ -507,9 +507,13 @@ def _infer_geometry(d: Drawing) -> None:
                 e.center, e.radius = fit[0], fit[1]
                 doors += 1
 
+    doors += _join_split_door_arcs(d)
+    _door_leaves(d)
+
     # Glazing lines sit a few centimetres apart inside a wall — exactly what
     # the parallel-pair wall rule below would also match. Windows go first.
     windows = _infer_windows(d)
+    windows += _infer_windows_from_gaps(d)
 
     # Parallel pairs a wall's width apart, overlapping along most of their
     # length. Lines are bucketed by direction and sorted by offset, so each one
@@ -551,6 +555,189 @@ def _infer_geometry(d: Drawing) -> None:
     for label, n in (("walls", walls), ("doors", doors), ("columns", columns), ("windows", windows)):
         if n:
             d.note(f"inferred {n} {label} from geometry (not confirmed by layer names)")
+
+
+DOOR_PIECE_SWEEP = 20.0       # degrees; a shorter arc piece is a fillet, not part of a swing
+HALF_SWEEP = (38.0, 59.0)     # degrees; a 45° swing drawn on its own, hinge on the wall
+
+
+def _join_split_door_arcs(d: Drawing) -> int:
+    """A door swing that the export split into two or three arc pieces.
+
+    Each piece on its own is too short a sweep to be a door. Pieces on the
+    same circle — same centre to a few centimetres, same radius — are one
+    swing; when their sweeps add up to a door's, all of them are the door.
+    """
+    pieces: list[tuple[Entity, tuple[float, float], float, float]] = []
+    for e in d.entities:
+        if e.role != Role.OTHER or e.kind != "polyline" or e.closed:
+            continue
+        fit = arc_like(e.points)
+        if not fit or not (DOOR_RADIUS[0] <= fit[1] <= DOOR_RADIUS[1]) or fit[2] < DOOR_PIECE_SWEEP:
+            continue
+        pieces.append((e, fit[0], fit[1], fit[2]))
+    # Pieces of one swing share a centre to a few centimetres and a radius to
+    # a few percent; a three-point fit on a short piece is that loose.
+    parent = list(range(len(pieces)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(pieces)):
+        for j in range(i + 1, len(pieces)):
+            (ci, ri), (cj, rj) = pieces[i][1:3], pieces[j][1:3]
+            if length(ci, cj) <= 0.12 and abs(ri - rj) <= 0.12 * max(ri, rj):
+                parent[find(i)] = find(j)
+    groups: dict[int, list] = {}
+    for i in range(len(pieces)):
+        groups.setdefault(find(i), []).append(pieces[i])
+    walls = [b for b in (e.bounds() for e in d.by_role(Role.WALL)) if b]
+
+    def on_wall(p, slack=0.25) -> bool:
+        return any(b[0] - slack <= p[0] <= b[2] + slack and b[1] - slack <= p[1] <= b[3] + slack
+                   for b in walls)
+
+    made = 0
+    for group in groups.values():
+        total = sum(sw for _, _, _, sw in group)
+        if len(group) < 2:
+            # A lone 45° piece is a half swing — the convention some offices
+            # draw — when its hinge sits on a wall.
+            if not (HALF_SWEEP[0] <= total <= HALF_SWEEP[1]) or not on_wall(group[0][1]):
+                continue
+        elif not (DOOR_SWEEP[0] <= total <= DOOR_SWEEP[1] + 15.0):
+            continue
+        centre = (sum(c[0] for _, c, _, _ in group) / len(group),
+                  sum(c[1] for _, c, _, _ in group) / len(group))
+        radius = sum(r for _, _, r, _ in group) / len(group)
+        for i, (e, _, _, _) in enumerate(group):
+            e.role, e.provenance = Role.DOOR, Provenance.INFERRED
+            e.center, e.radius = centre, radius
+            e.meta["door_piece"] = True
+            if i:
+                e.meta["door_secondary"] = True   # the leaf is drawn from the first piece only
+        made += 1
+    return made
+
+
+def _door_leaves(d: Drawing) -> None:
+    """Give every door its leaf: the line from the hinge to the swing's free end.
+
+    The swing arc runs from the leaf's tip to the latch jamb. The jamb end
+    touches a wall; the tip end stands out in the room. So the leaf goes from
+    the arc's centre to whichever end of the arc is farther from any wall.
+    """
+    walls = [b for b in (e.bounds() for e in d.by_role(Role.WALL)) if b]
+    if not walls:
+        return
+
+    def wall_distance(p) -> float:
+        best = float("inf")
+        for b in walls:
+            dx = max(b[0] - p[0], 0.0, p[0] - b[2])
+            dy = max(b[1] - p[1], 0.0, p[1] - b[3])
+            best = min(best, math.hypot(dx, dy))
+        return best
+
+    groups: dict[tuple[int, int, int], list[Entity]] = {}
+    for e in d.entities:
+        if e.role != Role.DOOR or e.center is None or e.radius is None or e.meta.get("leaf"):
+            continue
+        key = (int(round(e.center[0] / 0.04)), int(round(e.center[1] / 0.04)), int(round(e.radius / 0.03)))
+        groups.setdefault(key, []).append(e)
+    for members in groups.values():
+        ends = []
+        for e in members:
+            if e.kind == "arc" and e.start_angle is not None and e.end_angle is not None:
+                for a in (e.start_angle, e.end_angle):
+                    ends.append((e.center[0] + e.radius * math.cos(math.radians(a)),
+                                 e.center[1] + e.radius * math.sin(math.radians(a))))
+            elif e.points:
+                ends.extend((e.points[0], e.points[-1]))
+        if not ends:
+            continue
+        tip = max(ends, key=wall_distance)
+        if wall_distance(tip) < 0.15:
+            continue   # both ends on walls: not a swing we understand
+        first = members[0]
+        first.meta["leaf"] = [list(first.center), list(tip)]
+
+
+def _infer_windows_from_gaps(d: Drawing) -> int:
+    """A gap in a wall run bridged by a thin line along the wall: a window.
+
+    Many drawings do not draw glazing as a pair. They stop the wall, and
+    close the opening with one line where the glass is. That line is not a
+    wall (it is far too thin), not a door (nothing swings) and not a
+    dimension (it sits in the wall itself). Between two collinear runs of the
+    same wall, spanning most of the gap, it is a window.
+    """
+    rects = []
+    for e in d.by_role(Role.WALL):
+        if e.kind != "polyline" or not e.closed or not e.filled or len(e.points) != 4:
+            continue
+        b = e.bounds()
+        w, h = b[2] - b[0], b[3] - b[1]
+        if w >= 0.3 and h <= WALL_THICKNESS[1] and w > h:
+            rects.append(("h", b))
+        elif h >= 0.3 and w <= WALL_THICKNESS[1] and h > w:
+            rects.append(("v", b))
+    lines = [e for e in d.entities if e.kind == "line" and e.role == Role.OTHER
+             and not e.meta.get("hatch_stroke") and 0.35 <= e.length <= 5.0]
+    found = 0
+    for axis in ("h", "v"):
+        # A band is a set of rectangles that overlap across the wall: the
+        # rows a hatch reconstruction cut one wall into are one band.
+        across = sorted(((b[1], b[3]) if axis == "h" else (b[0], b[2]), b)
+                        for kind, b in rects if kind == axis)
+        bands: list[tuple[float, float, list]] = []
+        for (lo, hi), b in across:
+            if bands and lo < bands[-1][1] + 1e-6 and hi - bands[-1][0] <= WALL_THICKNESS[1] + 0.05:
+                bands[-1] = (bands[-1][0], max(bands[-1][1], hi), bands[-1][2] + [b])
+            else:
+                bands.append((lo, hi, [b]))
+        for band_lo, band_hi, members in bands:
+            along = sorted(((b[0], b[2]) if axis == "h" else (b[1], b[3])) for b in members)
+            runs: list[list[float]] = []
+            for a, b in along:
+                if runs and a <= runs[-1][1] + 0.05:
+                    runs[-1][1] = max(runs[-1][1], b)
+                else:
+                    runs.append([a, b])
+            slack_lo, slack_hi = band_lo - 0.06, band_hi + 0.06
+            for (a0, a1), (b0, b1) in zip(runs, runs[1:]):
+                gap = b0 - a1
+                if not (0.35 <= gap <= 4.0):
+                    continue
+                bridging = []
+                for e in lines:
+                    (x0, y0), (x1, y1) = e.points
+                    if axis == "h":
+                        if not (slack_lo <= y0 <= slack_hi and slack_lo <= y1 <= slack_hi):
+                            continue
+                        span = min(max(x0, x1), b0) - max(min(x0, x1), a1)
+                    else:
+                        if not (slack_lo <= x0 <= slack_hi and slack_lo <= x1 <= slack_hi):
+                            continue
+                        span = min(max(y0, y1), b0) - max(min(y0, y1), a1)
+                    if span >= 0.6 * gap:
+                        bridging.append(e)
+                if not bridging:
+                    continue
+                mid = (band_lo + band_hi) / 2.0
+                thickness = max(band_hi - band_lo, WALL_THICKNESS[0])
+                pts = [(a1, mid), (b0, mid)] if axis == "h" else [(mid, a1), (mid, b0)]
+                d.entities.append(Entity("polyline", pts, layer="window", role=Role.WINDOW,
+                                         provenance=Provenance.INFERRED, thickness=thickness,
+                                         meta={"symbol": "window"}))
+                for e in bridging:
+                    e.role, e.provenance = Role.WINDOW, Provenance.INFERRED
+                    e.meta["glazing"] = True
+                found += 1
+    return found
 
 
 WINDOW_LINES = (0.03, 0.45)   # metres between the glazing lines of one window
@@ -633,6 +820,11 @@ def _prune_stray_walls(d: Drawing) -> int:
     walls = [e for e in d.entities if e.role == Role.WALL and e.provenance == Provenance.INFERRED]
     if len(walls) < 2:
         return 0
+    # An opening sits in the line of its wall and joins the runs either side
+    # of it, so windows and doors connect groups; they are never pruned.
+    joints = [e for e in d.entities if e.role in (Role.WINDOW, Role.DOOR)]
+    n_walls = len(walls)
+    walls = walls + joints
     boxes = [e.bounds() for e in walls]
     parent = list(range(len(walls)))
 
@@ -646,11 +838,13 @@ def _prune_stray_walls(d: Drawing) -> int:
         return not (a[0] > b[2] + gap or b[0] > a[2] + gap or a[1] > b[3] + gap or b[1] > a[3] + gap)
 
     for i in range(len(walls)):
+        if boxes[i] is None:
+            continue
         for j in range(i + 1, len(walls)):
-            if touch(boxes[i], boxes[j]):
+            if boxes[j] is not None and touch(boxes[i], boxes[j]):
                 parent[find(i)] = find(j)
     groups: dict[int, list[int]] = {}
-    for i in range(len(walls)):
+    for i in range(n_walls):
         groups.setdefault(find(i), []).append(i)
     # The building is the group with room labels inside it. A sheet border is
     # longer than any house; it just has no rooms. Length only breaks ties.

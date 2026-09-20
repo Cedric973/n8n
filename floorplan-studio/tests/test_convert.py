@@ -351,6 +351,71 @@ class AnalyzerTests(unittest.TestCase):
         self.assertGreater(area, 0.9 * 6.0 * 0.2, "the band has holes in it")
         self.assertLess(len(walls), 12, "the band came out as a pile of slivers")
 
+    def test_door_swing_split_into_two_arcs_is_one_door_with_a_leaf(self):
+        """A 90° swing exported as two 45° pieces on the same circle."""
+        import math
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        hinge, r = (5.0, 0.0), 0.9
+        wall = [(0, -0.2), (10, -0.2), (10, 0), (0, 0)]   # the wall the door hangs in, below y=0
+        d.entities = [Entity("polyline", wall, closed=True, filled=True)]
+        for a0, a1 in ((0, 45), (45, 90)):
+            pts = [(hinge[0] + r * math.cos(math.radians(a0 + (a1 - a0) * i / 8)),
+                    hinge[1] + r * math.sin(math.radians(a0 + (a1 - a0) * i / 8))) for i in range(9)]
+            d.entities.append(Entity("polyline", pts))
+        d.entities.append(Entity("text", [(5, 3)], text="Office", height=0.2))
+        d = analyze(d)
+        doors = [e for e in d.entities if e.role == Role.DOOR]
+        self.assertEqual(len(doors), 2, "both pieces belong to the door")
+        leaves = [e.meta["leaf"] for e in doors if e.meta.get("leaf")]
+        self.assertEqual(len(leaves), 1, "one leaf per swing")
+        (hx, hy), (tx, ty) = leaves[0]
+        self.assertAlmostEqual(hx, 5.0, delta=0.05); self.assertAlmostEqual(hy, 0.0, delta=0.05)
+        self.assertAlmostEqual(ty, 0.9, delta=0.05, msg="the leaf goes to the end standing in the room")
+
+    def test_lone_half_swing_hinged_on_a_wall_is_a_door(self):
+        import math
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        d.entities = [Entity("polyline", [(0, -0.2), (10, -0.2), (10, 0), (0, 0)], closed=True, filled=True),
+                      Entity("text", [(5, 3)], text="Office", height=0.2)]
+        for cx, cy in ((5.0, 0.0), (5.0, 3.0)):   # one on the wall, one floating in the room
+            pts = [(cx + 0.9 * math.cos(math.radians(45 * i / 8)), cy + 0.9 * math.sin(math.radians(45 * i / 8)))
+                   for i in range(9)]
+            d.entities.append(Entity("polyline", pts))
+        d = analyze(d)
+        doors = [e for e in d.entities if e.role == Role.DOOR]
+        self.assertEqual(len(doors), 1)
+        self.assertAlmostEqual(doors[0].center[1], 0.0, delta=0.05)
+
+    def test_window_read_from_a_line_bridging_a_gap_in_the_wall(self):
+        """Wall stops, one thin line closes the opening, wall resumes."""
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        d.entities = [Entity("polyline", [(0, 0), (4, 0), (4, 0.2), (0, 0.2)], closed=True, filled=True),
+                      Entity("polyline", [(5.5, 0), (10, 0), (10, 0.2), (5.5, 0.2)], closed=True, filled=True),
+                      Entity("line", [(4, 0.1), (5.5, 0.1)]),
+                      Entity("line", [(4, 3), (5.5, 3)]),   # same length, not in the wall: not a window
+                      Entity("text", [(5, 2)], text="Office", height=0.2)]
+        d = analyze(d)
+        symbols = [e for e in d.entities if e.role == Role.WINDOW and e.meta.get("symbol")]
+        self.assertEqual(len(symbols), 1)
+        self.assertAlmostEqual(symbols[0].points[0][0], 4.0, delta=0.02)
+        self.assertAlmostEqual(symbols[0].points[1][0], 5.5, delta=0.02)
+        self.assertAlmostEqual(symbols[0].thickness, 0.2, delta=0.02)
+        self.assertTrue(d.entities[2].meta.get("glazing"))
+        self.assertNotEqual(d.entities[3].role, Role.WINDOW)
+
+    def test_windows_join_wall_runs_so_neither_side_is_pruned(self):
+        """Two wall bodies linked only by a window are one building."""
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        left = [Entity("polyline", [(0, 0), (4, 0), (4, 0.2), (0, 0.2)], closed=True, filled=True),
+                Entity("polyline", [(0, 0), (0.2, 0), (0.2, 4), (0, 4)], closed=True, filled=True)]
+        right = [Entity("polyline", [(5.5, 0), (10, 0), (10, 0.2), (5.5, 0.2)], closed=True, filled=True),
+                 Entity("polyline", [(9.8, 0), (10, 0), (10, 4), (9.8, 4)], closed=True, filled=True)]
+        d.entities = left + right + [Entity("line", [(4, 0.1), (5.5, 0.1)]),
+                                     Entity("text", [(1, 2)], text="Office", height=0.2),
+                                     Entity("text", [(1.2, 1.7)], text="12.00m2", height=0.2)]
+        d = analyze(d)
+        self.assertEqual([e.role for e in d.entities[:4]], [Role.WALL] * 4)
+
     def test_windows_inferred_from_glazing_lines_in_a_wall(self):
         d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
         wall = [(0, 0), (10, 0), (10, 0.25), (0, 0.25)]
@@ -483,9 +548,80 @@ class PipelineTests(unittest.TestCase):
         kept = room_labels([name, area, ceiling, pod, pod2, note, far])
         self.assertEqual(kept, {id(name), id(area)})
         self.assertEqual(display_text("KitchenLunchRoom"), "Kitchen Lunch Room")
-        self.assertEqual(display_text("Meetingroom1"), "Meetingroom 1")
+        self.assertEqual(display_text("Meetingroom1"), "Meeting room 1")
         self.assertEqual(display_text("40.09m2"), "40.09m2")           # the 2 of m2 stays put
         self.assertEqual(display_text("Salle de bain"), "Salle de bain")  # already spaced
+
+    def test_converted_plan_draws_door_leaf_window_symbol_and_own_chains(self):
+        import math
+        from floorplan.convert.render import build_drawing_scene, exterior_chains
+        from floorplan.render import GLASS
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        d.entities = [Entity("polyline", [(0, 0), (4, 0), (4, 0.2), (0, 0.2)], closed=True, filled=True),
+                      Entity("polyline", [(5.5, 0), (12, 0), (12, 0.2), (5.5, 0.2)], closed=True, filled=True),
+                      Entity("polyline", [(0, 0), (0.2, 0), (0.2, 8), (0, 8)], closed=True, filled=True),
+                      Entity("polyline", [(0, 7.8), (12, 7.8), (12, 8), (0, 8)], closed=True, filled=True),
+                      Entity("polyline", [(11.8, 0), (12, 0), (12, 8), (11.8, 8)], closed=True, filled=True),
+                      Entity("polyline", [(6, 0.2), (6.2, 0.2), (6.2, 7.8), (6, 7.8)], closed=True, filled=True),
+                      Entity("line", [(4, 0.1), (5.5, 0.1)]),
+                      Entity("text", [(2, 4)], text="Office", height=0.25),
+                      Entity("text", [(2, 3.6)], text="44.00m2", height=0.25)]
+        hinge = (8.0, 7.8)
+        d.entities.append(Entity("polyline", [(hinge[0] + 0.9 * math.cos(math.radians(180 + 90 * i / 12)),
+                                               hinge[1] + 0.9 * math.sin(math.radians(180 + 90 * i / 12)))
+                                              for i in range(13)]))
+        d = analyze(d)
+        self.assertEqual(len([e for e in d.entities if e.role == Role.DOOR]), 1)
+        south, west = exterior_chains(d)
+        self.assertAlmostEqual(south[0], 0.0, delta=0.05); self.assertAlmostEqual(south[-1], 12.0, delta=0.05)
+        self.assertTrue(any(abs(m - 4.0) < 0.05 for m in south) and any(abs(m - 5.5) < 0.05 for m in south),
+                        "the window's ends are marks on the south chain")
+        self.assertTrue(any(abs(m - 6.1) < 0.1 for m in south), "the partition is a bay mark")
+        scene = build_drawing_scene(d, level="client")
+        glazing = [p for p in scene.paths if p.stroke == GLASS and p.layer == "A-WIND"]
+        self.assertEqual(len(glazing), 2, "a window is two glazing lines")
+        leaves = [p for p in scene.paths if p.layer == "A-DOOR" and len(p.points) == 2]
+        self.assertEqual(len(leaves), 1, "the door has its leaf")
+        chain_texts = [t for t in scene.texts if t.layer == "A-DIMS"]
+        self.assertTrue(any("12.00 m" in t.value for t in chain_texts), "the overall run is dimensioned")
+        self.assertTrue(all(t.y < 0 or t.x < 0 for t in chain_texts), "chains sit outside the building")
+        title = [t for t in scene.texts if t.layer == "G-ANNO" and "FLOOR PLAN" in t.value]
+        self.assertTrue(title and title[0].y < min(t.y for t in chain_texts), "the title block is below the chains")
+
+    def test_room_label_is_recentred_in_its_room_when_the_area_agrees(self):
+        from floorplan.convert.render import label_stacks, recentre_labels
+        d = Drawing(units="m", units_provenance=Provenance.VERIFIED, to_metres=1.0)
+        shell = [Entity("polyline", [(0, 0), (8, 0), (8, 0.2), (0, 0.2)], closed=True, filled=True),
+                 Entity("polyline", [(0, 5.8), (8, 5.8), (8, 6), (0, 6)], closed=True, filled=True),
+                 Entity("polyline", [(0, 0), (0.2, 0), (0.2, 6), (0, 6)], closed=True, filled=True),
+                 Entity("polyline", [(7.8, 0), (8, 0), (8, 6), (7.8, 6)], closed=True, filled=True),
+                 Entity("polyline", [(3.9, 0), (4.1, 0), (4.1, 6), (3.9, 6)], closed=True, filled=True)]
+        for e in shell:
+            e.role, e.provenance = Role.WALL, Provenance.VERIFIED
+        # Left room 3.7 x 5.6 = 20.7 m²; its label sits in a corner. Right room's label lies.
+        left = [Entity("text", [(0.5, 5.0)], text="Office", height=0.25, role=Role.TEXT),
+                Entity("text", [(0.5, 4.6)], text="20.70m2", height=0.25, role=Role.TEXT)]
+        right = [Entity("text", [(6, 3)], text="Store", height=0.25, role=Role.TEXT),
+                 Entity("text", [(6, 2.6)], text="80.00m2", height=0.25, role=Role.TEXT)]
+        d.entities = shell + left + right
+        stacks = label_stacks(left + right)
+        moved = recentre_labels(d, stacks)
+        self.assertIn(id(left[1]), moved)
+        self.assertNotIn(id(right[1]), moved, "an area that disagrees with the room is not trusted")
+        nx, ny = moved[id(left[0])]
+        # The stack's centre lands on the room's centre (2.05, 3.0); the name
+        # line keeps its offset above the area line.
+        self.assertAlmostEqual(nx + 0.55 * 0.25 * len("Office") / 2, 2.05, delta=0.15)
+        self.assertAlmostEqual(ny, 3.0 + 0.2 - 0.125, delta=0.15)
+        self.assertAlmostEqual(moved[id(left[0])][1] - moved[id(left[1])][1], 0.4, delta=1e-6)
+
+    def test_display_text_restores_word_breaks_from_the_word_list(self):
+        from floorplan.convert.render import display_text
+        self.assertEqual(display_text("Rentedspace2"), "Rented space 2")
+        self.assertEqual(display_text("Restingroom"), "Resting room")
+        self.assertEqual(display_text("Co-workingspace3"), "Co-working space 3")
+        self.assertEqual(display_text("Hallway"), "Hallway")
+        self.assertEqual(display_text("Xyzzyplugh"), "Xyzzyplugh")   # not words: left alone
 
     def test_text_is_never_printed_smaller_than_two_millimetres(self):
         """The source's 1 mm dimension figures are printed at a size a reader

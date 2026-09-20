@@ -9,6 +9,7 @@ from ..pdf import render_pdf
 from ..raster import render_png
 from ..svg import render_svg
 from ..levels import LEVELS, LEVEL_INFO
+from ..quality import check_scene, summary
 from ..units import DEFAULT_UNITS
 from .analyze import analyze
 from .clean import clean
@@ -81,9 +82,11 @@ def convert_file(path: str | Path, formats=("pdf", "dxf"), out_dir: str | Path =
     suffix = f"-p{page}" if multipage else ""
     written: dict[str, str] = {}
     scene = None
+    readability: dict[str, dict] = {}
     for level in levels:
         scene = build_drawing_scene(drawing, sheet=sheet, scale=scale, units=units, level=level,
                                     drawing_number=drawing_number, revision=revision)
+        readability[level] = summary(check_scene(scene))
         stem = out / f"{Path(path).stem}{suffix}-{LEVEL_INFO[level][0]}"
         for fmt in formats:
             target = stem.with_suffix("." + fmt)
@@ -103,6 +106,12 @@ def convert_file(path: str | Path, formats=("pdf", "dxf"), out_dir: str | Path =
     report["sheet_type"] = drawing.metadata.get("sheet_type", "unknown")
     report["sheet"] = scene.sheet.name
     report["output_scale"] = scene.scale.label
+    report["readability"] = readability
+    worst = max(readability.values(), key=lambda r: r["issues"], default=None)
+    if worst and worst["issues"]:
+        report["warnings"].append(
+            "readability: " + ", ".join(f"{level} plan {r['issues']} issue(s)"
+                                        for level, r in readability.items() if r["issues"]))
     md = out / (Path(path).stem + suffix + "-report.md")
     js = out / (Path(path).stem + suffix + "-report.json")
     md.write_text(report_markdown(report), encoding="utf-8")

@@ -68,6 +68,7 @@ def build_scene(plan: Plan, show_dimensions: bool = True,
     _draw_walls(scene, plan)
     _punch_openings(scene, plan)
     _draw_symbols(scene, plan)
+    _draw_fixtures(scene, plan)
     _draw_labels(scene, plan, level)
     if show_dimensions:
         _draw_dimensions(scene, plan, level)
@@ -279,6 +280,9 @@ def _draw_labels(scene: Scene, plan: Plan, level: str = TECHNICAL) -> None:
         size = _fit(name, along, 0.78, bold=True)
         if size < MIN_LABEL or across < 1.6 * size:
             continue  # no room for a legible label
+        # A door swinging into a narrow room reaches the middle of it; the
+        # label steps along the room's long axis until it is clear.
+        cx, cy = _clear_of_swings(plan, room, net, cx, cy, text_width(name, size, True), size * 2.6, upright)
 
         units = plan.spec.units
         dims = format_dimensions(net.w, net.h, units)
@@ -304,6 +308,191 @@ def _draw_labels(scene: Scene, plan: Plan, level: str = TECHNICAL) -> None:
         else:
             scene.text(cx, cy, name, size=size, bold=True, color=INK,
                        rotate=rotate, layer="A-TEXT")
+
+
+def _swing_boxes(plan: Plan, room: PlacedRoom) -> list[Rect]:
+    """The squares each door swings through inside ``room``."""
+    boxes = []
+    for opening in plan.openings:
+        # A door swings into the first room it lists (see _swing_normal); the
+        # room on the other side only sees the opening.
+        if opening.kind == "window" or not opening.rooms or opening.rooms[0] != room.index:
+            continue
+        seg = opening.segment
+        w = seg.length
+        mx, my = seg.midpoint
+        nx, ny = _swing_normal(plan, opening)
+        if seg.vertical:
+            boxes.append(Rect(mx if nx > 0 else mx - w, my - w / 2.0, w, w))
+        else:
+            boxes.append(Rect(mx - w / 2.0, my if ny > 0 else my - w, w, w))
+    return boxes
+
+
+def _clear_of_swings(plan: Plan, room: PlacedRoom, net: Rect, cx: float, cy: float,
+                     box_w: float, box_h: float, upright: bool) -> tuple[float, float]:
+    """Move a label's centre along the room's long axis until its box clears
+    every door swing, or leave it where it was if nothing clears."""
+    swings = _swing_boxes(plan, room)
+    if not swings:
+        return cx, cy
+    if not upright:
+        box_w, box_h = box_h, box_w
+
+    def clear(x, y) -> bool:
+        box = Rect(x - box_w / 2.0, y - box_h / 2.0, box_w, box_h)
+        return not any(_overlaps(box, sw) for sw in swings)
+
+    if clear(cx, cy):
+        return cx, cy
+    along_x = net.w >= net.h
+    limit = (net.w - box_w) / 2.0 if along_x else (net.h - box_h) / 2.0
+    step = 0.25
+    k = 1
+    while k * step <= max(limit, 0.0):
+        for sign in (1.0, -1.0):
+            x, y = (cx + sign * k * step, cy) if along_x else (cx, cy + sign * k * step)
+            if clear(x, y):
+                return x, y
+        k += 1
+    return cx, cy
+
+
+def _overlaps(a: Rect, b: Rect) -> bool:
+    return a.x < b.x2 and b.x < a.x2 and a.y < b.y2 and b.y < a.y2
+
+
+# --------------------------------------------------------------------------
+# fixtures: the few symbols that make a room read as what it is
+# --------------------------------------------------------------------------
+
+FIXTURE = "#6f6f6f"
+
+
+def _draw_fixtures(scene: Scene, plan: Plan) -> None:
+    """A bed in each bedroom, the sanitary set in each bath, a counter run
+    in the kitchen. Nothing that would fight the label for the room's middle."""
+    for room in plan.rooms:
+        if room.rect.area <= 0:
+            continue
+        net = room.net_rect(plan.spec, plan.footprint)
+        key = room.type_key
+        if key in ("bedroom", "primary_bedroom"):
+            _place_bed(scene, plan, room, net, king=(key == "primary_bedroom"))
+        elif key in ("bathroom", "primary_bath", "powder"):
+            _place_bath(scene, plan, room, net, tub=(key != "powder"))
+        elif key == "kitchen":
+            _place_kitchen(scene, plan, room, net)
+
+
+def _free_walls(plan: Plan, room: PlacedRoom, net: Rect) -> list[str]:
+    """Sides of the room with no door in them, longest first."""
+    doors = [o for o in plan.openings if o.kind != "window" and room.index in o.rooms]
+    sides = {"south": net.y, "north": net.y2, "west": net.x, "east": net.x2}
+    free = []
+    for side, coord in sides.items():
+        vertical = side in ("west", "east")
+        blocked = any((o.segment.vertical == vertical) and
+                      abs((o.segment.x1 if vertical else o.segment.y1) - coord) < 0.6
+                      for o in doors)
+        if not blocked:
+            free.append(side)
+    free.sort(key=lambda sd: -(net.h if sd in ("west", "east") else net.w))
+    return free
+
+
+def _against(net: Rect, side: str, along: float, across: float, offset: float = 0.0) -> Rect:
+    """A rect of ``along`` x ``across`` centred on ``side`` of ``net``,
+    shifted ``offset`` along that side."""
+    if side == "south":
+        return Rect(net.center[0] - along / 2.0 + offset, net.y, along, across)
+    if side == "north":
+        return Rect(net.center[0] - along / 2.0 + offset, net.y2 - across, along, across)
+    if side == "west":
+        return Rect(net.x, net.center[1] - along / 2.0 + offset, across, along)
+    return Rect(net.x2 - across, net.center[1] - along / 2.0 + offset, across, along)
+
+
+def _fits(rect: Rect, net: Rect, swings: list[Rect]) -> bool:
+    inside = rect.x >= net.x - 1e-6 and rect.y >= net.y - 1e-6 and rect.x2 <= net.x2 + 1e-6 and rect.y2 <= net.y2 + 1e-6
+    return inside and not any(_overlaps(rect, sw) for sw in swings)
+
+
+def _outline(scene: Scene, r: Rect) -> None:
+    scene.rect(r, stroke=FIXTURE, width=HAIRLINE, layer="A-FURN")
+
+
+def _place_bed(scene: Scene, plan: Plan, room: PlacedRoom, net: Rect, king: bool) -> None:
+    head, length = (6.3, 6.7) if king else (5.0, 6.7)
+    swings = _swing_boxes(plan, room)
+    for side in _free_walls(plan, room, net):
+        bed = _against(net, side, head, length)
+        if not _fits(bed, net, swings):
+            continue
+        _outline(scene, bed)
+        # Pillows: a band along the headboard.
+        if side == "south":
+            scene.rect(Rect(bed.x + 0.3, bed.y + 0.3, bed.w - 0.6, 1.0), stroke=FIXTURE, width=HAIRLINE, layer="A-FURN")
+        elif side == "north":
+            scene.rect(Rect(bed.x + 0.3, bed.y2 - 1.3, bed.w - 0.6, 1.0), stroke=FIXTURE, width=HAIRLINE, layer="A-FURN")
+        elif side == "west":
+            scene.rect(Rect(bed.x + 0.3, bed.y + 0.3, 1.0, bed.h - 0.6), stroke=FIXTURE, width=HAIRLINE, layer="A-FURN")
+        else:
+            scene.rect(Rect(bed.x2 - 1.3, bed.y + 0.3, 1.0, bed.h - 0.6), stroke=FIXTURE, width=HAIRLINE, layer="A-FURN")
+        for offset in ((head + 1.6) / 2.0, -(head + 1.6) / 2.0):
+            stand = _against(net, side, 1.5, 1.5, offset)
+            if _fits(stand, net, swings):
+                _outline(scene, stand)
+        return
+
+
+def _place_bath(scene: Scene, plan: Plan, room: PlacedRoom, net: Rect, tub: bool) -> None:
+    swings = _swing_boxes(plan, room)
+    walls = _free_walls(plan, room, net)
+    if not walls:
+        return
+    placed: list[Rect] = []
+
+    def put(rect: Rect) -> bool:
+        if _fits(rect, net, swings + placed):
+            _outline(scene, rect)
+            placed.append(rect)
+            return True
+        return False
+
+    # Tub along the longest free wall, filling it when the wall is short.
+    if tub:
+        side = walls[0]
+        run = net.h if side in ("west", "east") else net.w
+        length = min(5.5, run - 0.2)
+        if length >= 4.0:
+            put(_against(net, side, length, 2.5))
+    # WC and basin on the next wall, or the same one when there is only one.
+    side = walls[1] if len(walls) > 1 else walls[0]
+    run = net.h if side in ("west", "east") else net.w
+    wc = _against(net, side, 1.6, 2.3, -run / 2.0 + 1.2)
+    if not put(wc):
+        put(_against(net, side, 1.6, 2.3, run / 2.0 - 1.2))
+    basin = _against(net, side, 2.0, 1.5, run / 2.0 - 1.4)
+    if not put(basin):
+        put(_against(net, side, 2.0, 1.5, -run / 2.0 + 1.4))
+
+
+def _place_kitchen(scene: Scene, plan: Plan, room: PlacedRoom, net: Rect) -> None:
+    """A counter run 2 ft deep along the longest door-free wall, with the sink
+    and range drawn as squares in it."""
+    swings = _swing_boxes(plan, room)
+    for side in _free_walls(plan, room, net):
+        run = (net.h if side in ("west", "east") else net.w) - 0.4
+        counter = _against(net, side, run, 2.0)
+        if run < 6.0 or not _fits(counter, net, swings):
+            continue
+        _outline(scene, counter)
+        for offset, size in ((-run / 4.0, 2.0), (run / 4.0, 2.5)):   # sink, range
+            unit = _against(net, side, size, 1.6, offset)
+            if _fits(unit, net, swings):
+                _outline(scene, unit)
+        return
 
 
 # --------------------------------------------------------------------------
