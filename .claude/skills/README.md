@@ -5,7 +5,9 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **350 skills**, each in its own directory as `.claude/skills/<name>/SKILL.md`.
+- **409 skills** (350 flat + the 59-skill gstack suite), each an
+  `.claude/skills/<name>/SKILL.md` (gstack skills are nested under
+  `.claude/skills/gstack/`, discovered recursively).
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -45,6 +47,16 @@ Vendored individually from their own repos (not part of the claude-skills librar
   Vue port of Motion. **This is the animation skill that applies to this repo's
   Vue frontend** (`editor-ui`, `@n8n/design-system`). Authored here (upstream
   ships an npm library, not a `SKILL.md`).
+- **gstack** — Garry Tan's opinionated Claude Code suite of 59 skills (CEO/`cso`,
+  `review`, `qa`, `ship`, `office-hours`, `design-review`, `spec`, planning,
+  iOS, docs, etc.) vendored as a nested tree under `.claude/skills/gstack/`. From
+  [garrytan/gstack](https://github.com/garrytan/gstack) (full tree minus the
+  `test/` fixtures). The three skills whose names collided with existing ones were
+  renamed `gstack-review`, `gstack-office-hours`, `gstack-freeze`. NOTE: upstream
+  is meant to be installed via its own `./setup` (which builds a `browse` browser
+  binary and registers commands); that build step was **not** run here, so skills
+  that shell out to the built binary or expect a user-level install may need
+  `./setup` run in `.claude/skills/gstack/` first.
 
 ## Updating
 
