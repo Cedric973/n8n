@@ -5,9 +5,10 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **411 skills** (352 flat + the 59-skill gstack suite), each an
-  `.claude/skills/<name>/SKILL.md` (gstack skills are nested under
-  `.claude/skills/gstack/`, discovered recursively).
+- **420 skills** (352 flat + the 59-skill gstack suite + the 9-skill
+  understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
+  and understand-anything suites are nested under their own directories, discovered
+  recursively).
 - Skills are flattened to one directory per skill (Claude Code discovers direct
   children of `.claude/skills/`). The 17 skills whose names collided across
   source domains are prefixed with their domain, e.g.
@@ -68,23 +69,18 @@ Vendored individually from their own repos (not part of the claude-skills librar
   `graphify/references/INSTALL.md`. Without the CLI the skill is discoverable but
   can't build/query graphs.
 
-## Plugins (registered in `.claude/settings.json`, not vendored here)
-
-Some tools are full Claude Code **plugins** (bundled Node code + `${CLAUDE_PLUGIN_ROOT}`),
-not standalone skills — vendoring loose SKILL.md files would break them. These are
-registered as a project marketplace + enabled plugin in `.claude/settings.json`, the
-mechanism they're designed for:
-
-- **understand-anything** — builds an interactive, explorable map/knowledge graph of
-  any codebase (every file, function, data flow) with commands `/understand`,
-  `/understand-onboard`, `/understand-explain`, `/understand-dashboard`, `/understand-diff`,
-  and more. From [Egonex-AI/Understand-Anything](https://github.com/Egonex-AI/Understand-Anything).
-  Registered via `extraKnownMarketplaces` + `enabledPlugins` in `.claude/settings.json`.
-  **One-time step per machine:** external GitHub plugins don't auto-fetch from project
-  settings alone — run `claude plugin install understand-anything@understand-anything`
-  once to install it (the settings pre-trust the marketplace and enable it). Full
-  graph/dashboard features also need the plugin's `pnpm install && build` (no prebuilt
-  `dist/` ships in the repo).
+- **understand-anything** — builds an interactive, explorable map/knowledge graph
+  of any unfamiliar codebase (every file, function, data flow). 9 skills vendored
+  as a nested tree under `.claude/skills/understand-anything/`: `understand`,
+  `understand-onboard`, `understand-explain`, `understand-chat`,
+  `understand-dashboard`, `understand-diff`, `understand-domain`,
+  `understand-figma`, `understand-knowledge`. From
+  [Egonex-AI/Understand-Anything](https://github.com/Egonex-AI/Understand-Anything)
+  (the `understand-anything-plugin/` tree, incl. its `packages/`, `agents/`, `hooks/`
+  and `src/`, minus node_modules). NOTE: the skills shell out to bundled Node
+  packages and reference `${CLAUDE_PLUGIN_ROOT}`; no prebuilt `dist/` ships, so
+  full graph/dashboard features need `pnpm install && build` inside
+  `.claude/skills/understand-anything/` on a machine that can run it.
 
 ## Updating
 
