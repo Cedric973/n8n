@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **422 skills** (354 flat + the 59-skill gstack suite + the 9-skill
+- **439 skills** (371 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
   and understand-anything suites are nested under their own directories, discovered
   recursively).
@@ -98,6 +98,18 @@ Vendored individually from their own repos (not part of the claude-skills librar
   (`skills/frontend-design`, incl. its LICENSE.txt). For this repo's Vue
   frontend, pair it with `motion-v` for animation and the CSS variables in
   `packages/frontend/CLAUDE.md`.
+- **Anthropic official skills (17 more)** — the rest of
+  [anthropics/skills](https://github.com/anthropics/skills), vendored as-is:
+  `academy-guide`, `algorithmic-art`, `canvas-design`, `discernment-nudge`,
+  `doc-coauthoring`, `docx`, `mcp-builder`, `pdf`, `pptx`, `skill-creator`,
+  `slack-gif-creator`, `theme-factory`, `web-artifacts-builder`,
+  `webapp-testing`, `xlsx`, plus `anthropic-brand-guidelines` and
+  `anthropic-internal-comms` (prefixed because the claude-skills library already
+  provides skills named `brand-guidelines` and `internal-comms`; the official
+  Anthropic versions are the `anthropic-` ones). Deliberately **omitted**:
+  `claude-api`, which only works against the paid Anthropic API. `docx`/`pptx`/
+  `xlsx`/`pdf` bundle helper scripts that need their Python/Node deps installed;
+  `webapp-testing` needs Playwright; `slack-gif-creator` targets Slack.
 
 ## Updating
 
