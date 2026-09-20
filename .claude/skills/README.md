@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **421 skills** (353 flat + the 59-skill gstack suite + the 9-skill
+- **422 skills** (354 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
   and understand-anything suites are nested under their own directories, discovered
   recursively).
@@ -90,6 +90,14 @@ Vendored individually from their own repos (not part of the claude-skills librar
   `agents/` and dev/eval scripts are omitted; runtime `scripts/` (incl. the
   vendored X-search client) are kept. Live searches need outbound network
   access and per-source API keys — see `CONFIGURATION.md` upstream.
+- **frontend-design** — Anthropic's official design skill: picks a real
+  aesthetic direction (typography, color, motion, layout) and ships
+  distinctive, production-grade UI instead of templated "AI-looking" defaults.
+  Auto-applies when building or reshaping UI. From
+  [anthropics/skills](https://github.com/anthropics/skills)
+  (`skills/frontend-design`, incl. its LICENSE.txt). For this repo's Vue
+  frontend, pair it with `motion-v` for animation and the CSS variables in
+  `packages/frontend/CLAUDE.md`.
 
 ## Updating
 
