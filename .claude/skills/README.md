@@ -68,6 +68,24 @@ Vendored individually from their own repos (not part of the claude-skills librar
   `graphify/references/INSTALL.md`. Without the CLI the skill is discoverable but
   can't build/query graphs.
 
+## Plugins (registered in `.claude/settings.json`, not vendored here)
+
+Some tools are full Claude Code **plugins** (bundled Node code + `${CLAUDE_PLUGIN_ROOT}`),
+not standalone skills — vendoring loose SKILL.md files would break them. These are
+registered as a project marketplace + enabled plugin in `.claude/settings.json`, the
+mechanism they're designed for:
+
+- **understand-anything** — builds an interactive, explorable map/knowledge graph of
+  any codebase (every file, function, data flow) with commands `/understand`,
+  `/understand-onboard`, `/understand-explain`, `/understand-dashboard`, `/understand-diff`,
+  and more. From [Egonex-AI/Understand-Anything](https://github.com/Egonex-AI/Understand-Anything).
+  Registered via `extraKnownMarketplaces` + `enabledPlugins` in `.claude/settings.json`.
+  **One-time step per machine:** external GitHub plugins don't auto-fetch from project
+  settings alone — run `claude plugin install understand-anything@understand-anything`
+  once to install it (the settings pre-trust the marketplace and enable it). Full
+  graph/dashboard features also need the plugin's `pnpm install && build` (no prebuilt
+  `dist/` ships in the repo).
+
 ## Updating
 
 These were vendored from the upstream repo. To refresh, re-clone upstream and
