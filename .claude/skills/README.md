@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **410 skills** (351 flat + the 59-skill gstack suite), each an
+- **411 skills** (352 flat + the 59-skill gstack suite), each an
   `.claude/skills/<name>/SKILL.md` (gstack skills are nested under
   `.claude/skills/gstack/`, discovered recursively).
 - Skills are flattened to one directory per skill (Claude Code discovers direct
@@ -60,6 +60,13 @@ Vendored individually from their own repos (not part of the claude-skills librar
 - **stop-slop** — strip predictable AI-writing tells (em-dashes, "it's not X,
   it's Y", hollow intros) from prose when drafting/editing/reviewing. From
   [hardikpandya/stop-slop](https://github.com/hardikpandya/stop-slop).
+- **graphify** — turn any folder of code/SQL/docs/papers/media into a queryable
+  knowledge graph ("real memory") and answer codebase questions from the graph.
+  From [safishamsi/graphify](https://github.com/safishamsi/graphify) — the Claude
+  skill body + references (what `graphify install` deploys). REQUIRES the CLI:
+  `uv tool install graphifyy && graphify install`. See
+  `graphify/references/INSTALL.md`. Without the CLI the skill is discoverable but
+  can't build/query graphs.
 
 ## Updating
 
