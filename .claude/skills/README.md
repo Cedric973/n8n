@@ -5,7 +5,7 @@ can discover and use them automatically. The bulk come from the
 [claude-skills](https://github.com/alirezarezvani/claude-skills) library, plus
 individually vendored skills (see **Additional skills** below).
 
-- **439 skills** (371 flat + the 59-skill gstack suite + the 9-skill
+- **440 skills** (372 flat + the 59-skill gstack suite + the 9-skill
   understand-anything suite), each an `.claude/skills/<name>/SKILL.md` (the gstack
   and understand-anything suites are nested under their own directories, discovered
   recursively).
@@ -110,6 +110,15 @@ Vendored individually from their own repos (not part of the claude-skills librar
   `claude-api`, which only works against the paid Anthropic API. `docx`/`pptx`/
   `xlsx`/`pdf` bundle helper scripts that need their Python/Node deps installed;
   `webapp-testing` needs Playwright; `slack-gif-creator` targets Slack.
+- **design-md** — extract, author, and apply `DESIGN.md` design-system files
+  (TypeUI format) so UI matches a given site or brand. Authored here on top of
+  [bergside/design-md-chrome](https://github.com/bergside/design-md-chrome)
+  (MIT), a Chrome extension that reads any site's live styles and generates
+  `DESIGN.md` / design `SKILL.md`. The extension is vendored, loadable, under
+  `design-md/references/extension/` ("Load unpacked" in Chrome), with its Node
+  generators (`lib/`) usable without a browser and the canonical format
+  blueprint at `design-md/references/DESIGN-BLUEPRINT.md`. Note: extracting
+  from a live site needs a real Chrome on your machine.
 
 ## Updating
 
