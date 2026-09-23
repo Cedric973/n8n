@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "floorplan-studio"
+version = "0.1.0"
+description = "Generate residential floor plans from a footprint and a room program."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["floor plan", "architecture", "layout", "svg", "dxf", "generative design"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics :: Presentation",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Reading existing drawings. The generator itself needs nothing.
+convert = ["ezdxf>=1.1", "pdfminer.six>=20221105"]
+
+[project.scripts]
+floorplan = "floorplan.cli:main"
+floorplan-server = "floorplan.server:main"
+
+[tool.setuptools]
+packages = ["floorplan"]
+
+[tool.setuptools.package-data]
+floorplan = ["static/*.html"]

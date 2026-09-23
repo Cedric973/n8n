@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Floorplan Studio</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --ink: #1b1b1b; --muted: #6b6b6b;
+    --line: #e2e2dd; --accent: #2f6f4f; --accent-ink: #ffffff; --shadow: rgba(0,0,0,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a; --panel: #1f2023; --ink: #ececea; --muted: #9a9a96;
+      --line: #313338; --accent: #58a97c; --accent-ink: #10231a; --shadow: rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  header {
+    padding: 18px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 330px 1fr; gap: 20px; padding: 20px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; box-shadow: 0 1px 3px var(--shadow);
+  }
+  .panel + .panel { margin-top: 16px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input[type=number], input[type=text], select {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink); font: inherit; font-size: 14px;
+  }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .shapes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+  .shapes button, .mini {
+    padding: 7px 4px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .shapes button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .shapes button:hover, .mini:hover { border-color: var(--accent); }
+  canvas { width: 100%; height: 230px; border: 1px solid var(--line);
+           border-radius: 8px; background: var(--bg); touch-action: none; cursor: crosshair; display: block; }
+  .canvas-tools { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .canvas-tools .spacer { flex: 1; }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .unit { color: var(--muted); }
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+  .toggles label { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 14px; margin: 0; cursor: pointer; }
+  button.primary {
+    width: 100%; margin-top: 14px; padding: 11px; border: 0; border-radius: 9px;
+    background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600;
+    font-size: 15px; cursor: pointer;
+  }
+  button.primary:disabled { opacity: .55; cursor: progress; }
+  .error { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px;
+           background: #fdeaea; color: #8a1f1f; border: 1px solid #f3c9c9; }
+  @media (prefers-color-scheme: dark) { .error { background: #3a1e1e; color: #f0b7b7; border-color: #5a2a2a; } }
+  .cards { display: grid; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          overflow: hidden; box-shadow: 0 1px 3px var(--shadow); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .card-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+               border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .card-head strong { font-size: 15px; }
+  .card-head .stats { color: var(--muted); font-size: 13px; }
+  .card-head .spacer { flex: 1; }
+  .card svg { display: block; width: 100%; height: auto; background: #fff; }
+  .downloads { display: flex; gap: 6px; }
+  .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+  .badge { font-variant-numeric: tabular-nums; font-size: 12px; padding: 2px 7px;
+           border-radius: 20px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Floorplan Studio</h1>
+  <p>Draw a footprint, choose your rooms, get dimensioned plans.</p>
+</header>
+
+<main>
+  <form id="controls">
+    <section class="panel">
+      <h2>Footprint</h2>
+      <div class="shapes" id="shapes">
+        <button type="button" data-shape="rectangle" aria-pressed="true">Rect</button>
+        <button type="button" data-shape="l" aria-pressed="false">L</button>
+        <button type="button" data-shape="t" aria-pressed="false">T</button>
+        <button type="button" data-shape="u" aria-pressed="false">U</button>
+      </div>
+      <div class="row">
+        <div><label for="width">Width <span class="unit">(m)</span></label><input type="number" id="width" value="15" min="2.4" max="91" step="0.5"></div>
+        <div><label for="depth">Depth <span class="unit">(m)</span></label><input type="number" id="depth" value="10" min="2.4" max="91" step="0.5"></div>
+      </div>
+      <div class="row">
+        <div><label for="units">Units</label>
+          <select id="units">
+            <option value="metric" selected>Metres</option>
+            <option value="imperial">Feet and inches</option>
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <canvas id="pad" width="600" height="460"></canvas>
+      <div class="canvas-tools">
+        <button type="button" class="mini" id="draw">Draw custom</button>
+        <button type="button" class="mini" id="undo">Undo</button>
+        <button type="button" class="mini" id="reset">Reset</button>
+        <span class="spacer"></span>
+        <span class="badge" id="area">150 m²</span>
+      </div>
+      <p class="hint" id="hint">Presets follow the width and depth above. Choose <em>Draw custom</em> to click out any rectilinear shape.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Program</h2>
+      <div class="row">
+        <div><label for="bedrooms">Bedrooms</label><input type="number" id="bedrooms" value="3" min="1" max="8"></div>
+        <div><label for="bathrooms">Bathrooms</label><input type="number" id="bathrooms" value="2" min="1" max="8"></div>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="formal_dining" checked> Dining</label>
+        <label><input type="checkbox" id="pantry" checked> Pantry</label>
+        <label><input type="checkbox" id="laundry" checked> Laundry</label>
+        <label><input type="checkbox" id="office"> Office</label>
+        <label><input type="checkbox" id="mudroom"> Mudroom</label>
+        <label><input type="checkbox" id="garage"> Garage</label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Output</h2>
+      <div class="row">
+        <div><label for="variants">Variants</label><input type="number" id="variants" value="3" min="1" max="6"></div>
+        <div><label for="seed">Seed</label><input type="number" id="seed" value="0" min="0" max="99999"></div>
+      </div>
+      <label for="title">Title</label>
+      <input type="text" id="title" value="Untitled Plan" maxlength="80">
+      <label for="level" style="margin-top:10px">Download as</label>
+      <select id="level">
+        <option value="client" selected>Client plan — walls, openings, names, areas</option>
+        <option value="dimension">Dimension plan — every chain, room sizes</option>
+        <option value="technical">Technical plan — everything, with provenance</option>
+      </select>
+      <button class="primary" id="go" type="submit">Generate plans</button>
+      <div class="error" id="error" hidden></div>
+    </section>
+  </form>
+
+  <section>
+    <form class="panel" id="convert-form" style="margin-bottom:16px">
+      <h2>Convert an existing plan</h2>
+      <label for="upload">DXF, SVG or vector PDF</label>
+      <input type="file" id="upload" accept=".dxf,.svg,.pdf" style="width:100%;font:inherit;font-size:13px">
+      <div class="toggles" style="margin-top:10px">
+        <label><input type="checkbox" name="fmt" value="pdf" checked> PDF</label>
+        <label><input type="checkbox" name="fmt" value="dxf" checked> DXF</label>
+        <label><input type="checkbox" name="fmt" value="svg" checked> SVG</label>
+        <label><input type="checkbox" name="fmt" value="png"> PNG</label>
+      </div>
+      <button class="primary" id="convert-go" type="submit">Analyse and convert</button>
+      <p class="hint">Vector sources only. Scans and photographs are not reconstructed. Anything the analyser infers rather than reads is drawn dashed and listed in the report.</p>
+      <div class="error" id="convert-error" hidden></div>
+    </form>
+    <div class="cards" id="cards">
+      <div class="panel empty">Set a footprint and a program, then generate.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var GRID = 0.5, PRESET = "rectangle", custom = null, drawing = false, pending = [];
+  var UNITS = { imperial: { grid: 1, label: "ft", area: "sq ft", w: 48, d: 32, min: 8, max: 300 },
+                metric:   { grid: 0.5, label: "m", area: "m\u00b2", w: 15, d: 10, min: 2.4, max: 91 } };
+  var pad = document.getElementById("pad"), ctx = pad.getContext("2d");
+  var $ = function (id) { return document.getElementById(id); };
+
+  function num(id, fallback) {
+    var v = parseFloat($(id).value);
+    return isFinite(v) ? v : fallback;
+  }
+
+  // ---- footprint geometry ------------------------------------------------
+  function presetPoints(shape, w, d) {
+    var nw = Math.max(4, Math.round(w / 3)), nh = Math.max(4, Math.round(d / 3));
+    if (shape === "l") return [[0,0],[w,0],[w,d-nh],[w-nw,d-nh],[w-nw,d],[0,d]];
+    if (shape === "t") {
+      var sw = Math.max(4, Math.round(w / 2.5)), sh = Math.max(4, Math.round(d / 3));
+      var x0 = (w - sw) / 2, base = d - sh;
+      return [[0,0],[w,0],[w,base],[x0+sw,base],[x0+sw,d],[x0,d],[x0,base],[0,base]];
+    }
+    if (shape === "u") {
+      var uw = Math.max(4, Math.round(w / 3.5)), uh = Math.max(4, Math.round(d / 3));
+      var ux = (w - uw) / 2;
+      return [[0,0],[w,0],[w,d],[ux+uw,d],[ux+uw,d-uh],[ux,d-uh],[ux,d],[0,d]];
+    }
+    return [[0,0],[w,0],[w,d],[0,d]];
+  }
+
+  function currentPoints() {
+    if (custom) return custom;
+    return presetPoints(PRESET, num("width", 15), num("depth", 10));
+  }
+
+  function area(points) {
+    var a = 0;
+    for (var i = 0; i < points.length; i++) {
+      var p = points[i], q = points[(i + 1) % points.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return Math.abs(a / 2);
+  }
+
+  // ---- canvas ------------------------------------------------------------
+  function view(points) {
+    var xs = points.map(function (p) { return p[0]; }).concat([0]);
+    var ys = points.map(function (p) { return p[1]; }).concat([0]);
+    var w = Math.max.apply(null, xs), h = Math.max.apply(null, ys);
+    var span = Math.max(w, h, 40) * 1.15;
+    var s = Math.min(pad.width / span, pad.height / span);
+    return { s: s, ox: (pad.width - w * s) / 2, oy: pad.height - (pad.height - h * s) / 2, span: span };
+  }
+
+  function toScreen(v, p) { return [v.ox + p[0] * v.s, v.oy - p[1] * v.s]; }
+  function toWorld(v, x, y) {
+    return [Math.round((x - v.ox) / v.s / GRID) * GRID, Math.round((v.oy - y) / v.s / GRID) * GRID];
+  }
+
+  function styles() {
+    var cs = getComputedStyle(document.body);
+    return { line: cs.getPropertyValue("--line").trim() || "#ddd",
+             ink: cs.getPropertyValue("--ink").trim() || "#222",
+             accent: cs.getPropertyValue("--accent").trim() || "#2f6f4f" };
+  }
+
+  function draw() {
+    var pts = drawing ? pending : currentPoints();
+    var v = view(pts.length ? pts : [[0,0],[40,0],[40,30],[0,30]]);
+    var c = styles();
+    ctx.clearRect(0, 0, pad.width, pad.height);
+
+    ctx.strokeStyle = c.line; ctx.lineWidth = 1;
+    var step = v.span > 90 ? 10 : 5;
+    for (var g = 0; g <= v.span; g += step) {
+      var a = toScreen(v, [g, 0]), b = toScreen(v, [g, v.span]);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      var e = toScreen(v, [0, g]), f = toScreen(v, [v.span, g]);
+      ctx.beginPath(); ctx.moveTo(e[0], e[1]); ctx.lineTo(f[0], f[1]); ctx.stroke();
+    }
+
+    if (pts.length) {
+      ctx.beginPath();
+      pts.forEach(function (p, i) {
+        var s = toScreen(v, p);
+        if (i === 0) ctx.moveTo(s[0], s[1]); else ctx.lineTo(s[0], s[1]);
+      });
+      if (!drawing) ctx.closePath();
+      ctx.fillStyle = c.accent + "22"; ctx.strokeStyle = c.accent; ctx.lineWidth = 2;
+      if (!drawing) ctx.fill();
+      ctx.stroke();
+      pts.forEach(function (p, i) {
+        var s = toScreen(v, p);
+        ctx.beginPath(); ctx.arc(s[0], s[1], i === 0 && drawing ? 6 : 3.5, 0, 6.2832);
+        ctx.fillStyle = i === 0 && drawing ? c.accent : c.ink; ctx.fill();
+      });
+    }
+    var u = UNITS[$("units").value];
+    var sq = drawing ? 0 : area(pts);
+    $("area").textContent = sq
+      ? (sq < 100 ? sq.toFixed(1) : Math.round(sq).toLocaleString()) + " " + u.area
+      : "click to close the shape";
+  }
+
+  pad.addEventListener("pointerdown", function (ev) {
+    if (!drawing) return;
+    var r = pad.getBoundingClientRect();
+    var x = (ev.clientX - r.left) * pad.width / r.width;
+    var y = (ev.clientY - r.top) * pad.height / r.height;
+    var v = view(pending.length ? pending : [[0,0],[40,0],[40,30],[0,30]]);
+    var p = toWorld(v, x, y);
+
+    if (pending.length) {
+      var last = pending[pending.length - 1];
+      if (Math.abs(p[0] - last[0]) >= Math.abs(p[1] - last[1])) p = [p[0], last[1]];
+      else p = [last[0], p[1]];
+      if (p[0] === last[0] && p[1] === last[1]) return;
+
+      var first = pending[0], s0 = toScreen(v, first);
+      if (pending.length >= 3 && Math.hypot(s0[0] - x, s0[1] - y) < 14) return finish();
+    }
+    pending.push(p);
+    draw();
+  });
+
+  function finish() {
+    var pts = pending.slice(), first = pts[0], last = pts[pts.length - 1];
+    if (last[0] !== first[0] && last[1] !== first[1]) {
+      var prev = pts[pts.length - 2];
+      pts.push(prev[1] === last[1] ? [last[0], first[1]] : [first[0], last[1]]);
+    }
+    if (pts.length < 4 || area(pts) < ($("units").value === "metric" ? 10 : 100)) {
+      showError("That shape is too small or not closed — try again.");
+      return reset();
+    }
+    // Normalise to the first quadrant.
+    var minX = Math.min.apply(null, pts.map(function (p) { return p[0]; }));
+    var minY = Math.min.apply(null, pts.map(function (p) { return p[1]; }));
+    custom = pts.map(function (p) { return [p[0] - minX, p[1] - minY]; });
+    drawing = false; pending = [];
+    $("draw").textContent = "Draw custom";
+    $("hint").textContent = "Custom footprint of " + Math.round(area(custom)).toLocaleString() +
+                            " sq ft. Pick a preset to go back.";
+    draw();
+  }
+
+  function reset() {
+    drawing = false; pending = []; custom = null;
+    $("draw").textContent = "Draw custom";
+    $("hint").textContent = "Presets follow the width and depth above. Choose Draw custom to click out any rectilinear shape.";
+    draw();
+  }
+
+  $("draw").addEventListener("click", function () {
+    drawing = !drawing; pending = []; custom = null;
+    this.textContent = drawing ? "Cancel drawing" : "Draw custom";
+    $("hint").textContent = drawing
+      ? "Click corners — edges snap to horizontal or vertical. Click the first point to close."
+      : "Presets follow the width and depth above.";
+    draw();
+  });
+  $("undo").addEventListener("click", function () {
+    if (drawing && pending.length) { pending.pop(); draw(); } else reset();
+  });
+  $("reset").addEventListener("click", reset);
+
+  Array.prototype.forEach.call($("shapes").children, function (btn) {
+    btn.addEventListener("click", function () {
+      PRESET = btn.dataset.shape; custom = null; drawing = false; pending = [];
+      Array.prototype.forEach.call($("shapes").children, function (b) {
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+      $("draw").textContent = "Draw custom";
+      draw();
+    });
+  });
+  ["width", "depth"].forEach(function (id) {
+    $(id).addEventListener("input", function () { if (!custom) draw(); });
+  });
+  $("units").addEventListener("change", function () {
+    var u = UNITS[this.value];
+    GRID = u.grid;
+    Array.prototype.forEach.call(document.querySelectorAll(".unit"), function (el) {
+      el.textContent = "(" + u.label + ")";
+    });
+    ["width", "depth"].forEach(function (id, i) {
+      var input = $(id);
+      input.min = u.min; input.max = u.max;
+      input.step = this.value === "metric" ? 0.5 : 1;
+      input.value = i === 0 ? u.w : u.d;
+    }, this);
+    custom = null; drawing = false; pending = [];
+    $("draw").textContent = "Draw custom";
+    draw();
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+
+  // ---- requests ----------------------------------------------------------
+  function payload() {
+    return {
+      footprint: currentPoints(),
+      title: $("title").value || "Untitled Plan",
+      bedrooms: num("bedrooms", 3), bathrooms: num("bathrooms", 2),
+      office: $("office").checked, garage: $("garage").checked,
+      mudroom: $("mudroom").checked, formal_dining: $("formal_dining").checked,
+      pantry: $("pantry").checked, laundry: $("laundry").checked,
+      variants: num("variants", 3), seed: num("seed", 0),
+      units: $("units").value
+    };
+  }
+
+  function showError(message) {
+    var box = $("error");
+    box.textContent = message; box.hidden = !message;
+  }
+
+  document.getElementById("controls").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    if (drawing) return showError("Finish or cancel the footprint first.");
+    showError("");
+    var button = $("go");
+    button.disabled = true; button.textContent = "Generating…";
+    var body = payload();
+    fetch("/api/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || "generation failed");
+        return data;
+      });
+    }).then(function (data) {
+      render(data.variants, body);
+    }).catch(function (err) {
+      showError(err.message);
+    }).finally(function () {
+      button.disabled = false; button.textContent = "Generate plans";
+    });
+  });
+
+  function render(variants, body) {
+    var host = $("cards");
+    host.innerHTML = "";
+    if (!variants.length) {
+      host.innerHTML = '<div class="panel empty">No plans came back.</div>';
+      return;
+    }
+    variants.forEach(function (variant, index) {
+      var s = variant.summary;
+      var card = document.createElement("article");
+      card.className = "card" + (index === 0 ? " selected" : "");
+
+      var head = document.createElement("div");
+      head.className = "card-head";
+      head.innerHTML =
+        "<strong>Option " + (index + 1) + "</strong>" +
+        '<span class="stats">' + s.bedrooms + " bed · " + s.bathrooms + " bath · " +
+        s.conditioned_sqft.toLocaleString() + " sf</span>" +
+        '<span class="badge">score ' + s.score.toFixed(1) + "</span>" +
+        '<span class="badge">' + variant.sheet + " \u00b7 " + variant.scale + "</span>" +
+        '<span class="spacer"></span>';
+
+      var downloads = document.createElement("span");
+      downloads.className = "downloads";
+      ["pdf", "png", "svg", "dxf"].forEach(function (fmt) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "mini"; b.textContent = fmt.toUpperCase();
+        b.addEventListener("click", function () { download(body, variant.seed, fmt, b); });
+        downloads.appendChild(b);
+      });
+      head.appendChild(downloads);
+      card.appendChild(head);
+
+      var art = document.createElement("div");
+      art.innerHTML = variant.svg;
+      card.appendChild(art);
+      card.addEventListener("click", function () {
+        Array.prototype.forEach.call(host.children, function (c) { c.classList.remove("selected"); });
+        card.classList.add("selected");
+      });
+      host.appendChild(card);
+    });
+  }
+
+  function download(body, seed, fmt, button) {
+    var original = button.textContent;
+    button.textContent = "…";
+    var request = Object.assign({}, body, { seed: seed, format: fmt, level: $("level").value });
+    fetch("/api/export", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request)
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { throw new Error(d.error || "export failed"); });
+      var name = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/);
+      return r.blob().then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = name ? name[1] : "floor-plan." + fmt;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      });
+    }).catch(function (err) {
+      showError(err.message);
+    }).finally(function () { button.textContent = original; });
+  }
+
+  // ---- conversion --------------------------------------------------------
+  document.getElementById("convert-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var input = $("upload"), err = $("convert-error"), btn = $("convert-go");
+    err.hidden = true;
+    if (!input.files.length) { err.textContent = "Choose a file first."; err.hidden = false; return; }
+    var fmts = Array.prototype.filter.call(document.querySelectorAll('input[name=fmt]:checked'),
+                                           function (c) { return true; }).map(function (c) { return c.value; });
+    var data = new FormData();
+    data.append("file", input.files[0]);
+    data.append("formats", fmts.concat(["svg"]).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(","));
+    data.append("units", $("units").value);
+    btn.disabled = true; btn.textContent = "Converting…";
+    fetch("/api/convert", { method: "POST", body: data }).then(function (r) {
+      return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "conversion failed"); return d; });
+    }).then(renderConversion).catch(function (e) {
+      err.textContent = e.message; err.hidden = false;
+    }).finally(function () { btn.disabled = false; btn.textContent = "Analyse and convert"; });
+  });
+
+  function sum(o) { return Object.keys(o || {}).reduce(function (n, k) { return n + o[k]; }, 0); }
+
+  function renderConversion(d) {
+    var host = $("cards"), r = d.report;
+    host.innerHTML = "";
+    var card = document.createElement("article");
+    card.className = "card selected";
+    var head = document.createElement("div");
+    head.className = "card-head";
+    head.innerHTML = "<strong>" + (r.source_file || "").split(/[\\/]/).pop() + "</strong>" +
+      '<span class="badge">quality ' + r.source_quality + "</span>" +
+      '<span class="badge">scale ' + (r.detected_scale || "unknown") + " · " + r.scale_provenance + "</span>" +
+      '<span class="badge">units ' + (r.detected_units || "unknown") + " · " + r.units_provenance + "</span>" +
+      '<span class="badge">verified ' + sum(r.verified_elements) + " · inferred " + sum(r.inferred_elements) + "</span>" +
+      '<span class="spacer"></span>';
+    head.appendChild(document.createElement("span")); card.appendChild(head);
+    var groups = {};
+    Object.keys(d.downloads).forEach(function (k) {
+      var parts = k.split("_"); var g = parts.length > 1 && parts[0] !== "report" ? parts[0] : "report";
+      (groups[g] = groups[g] || []).push(k);
+    });
+    var bar = document.createElement("div"); bar.className = "card-head";
+    ["client", "dimension", "technical", "report"].forEach(function (g) {
+      if (!groups[g]) return;
+      var label = document.createElement("span"); label.className = "stats";
+      label.textContent = g.charAt(0).toUpperCase() + g.slice(1) + ":"; bar.appendChild(label);
+      groups[g].forEach(function (k) {
+        var a = document.createElement("a"); a.className = "mini"; a.href = d.downloads[k];
+        a.textContent = k.replace(g + "_", "").replace("report_", "").toUpperCase(); a.style.textDecoration = "none";
+        bar.appendChild(a);
+      });
+    });
+    card.appendChild(bar);
+    if (r.warnings && r.warnings.length) {
+      var w = document.createElement("div"); w.className = "error"; w.style.margin = "12px 16px 0";
+      w.innerHTML = "<strong>Warnings</strong><br>" + r.warnings.map(function (x) { return "• " + x; }).join("<br>");
+      card.appendChild(w);
+    }
+    var art = document.createElement("div"); art.innerHTML = d.svg || '<div class="empty">No preview.</div>';
+    card.appendChild(art);
+    host.appendChild(card);
+  }
+
+  draw();
+})();
+</script>
+</body>
+</html>
